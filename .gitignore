@@ -1,0 +1,35 @@
+# Go
+server/panel
+
+# Go build
+*.exe
+*.out
+
+
+# Node
+frontend/node_modules/
+
+frontend/dist/
+
+
+# IDE
+.vscode/
+.idea/
+
+
+# logs
+*.log
+
+
+# database
+*.db
+*.sqlite
+
+
+# environment
+.env
+
+
+# OS
+.DS_Store
+Thumbs.db

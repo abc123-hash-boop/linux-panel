@@ -1,0 +1,1220 @@
+.msfiles {
+  background: var(--fakeMica);
+  color: var(--txt-col);
+
+  .msribbon {
+    padding: 1em 1em 0.6em 0;
+    box-sizing: border-box;
+    border: solid 0 var(--comp-txt);
+    border-bottom-width: 1px;
+    width: auto;
+  }
+
+  .restWindow {
+    background: var(--bg1);
+  }
+}
+
+.ribsec {
+  display: flex;
+  color: var(--txt-col);
+  font-size: 0.8em;
+  align-items: center;
+  box-sizing: border-box;
+  border: solid 0 var(--dsb-col);
+  border-right-width: 1px;
+  padding: 0.4em 0.8em;
+
+  & > .uicon {
+    margin: 0 0.5em;
+  }
+}
+
+.drdwcont {
+  margin: 0 0.4em;
+}
+
+.dropdownmenu {
+  display: flex;
+  flex-direction: column;
+  position: relative;
+
+  .droptitle {
+    display: flex;
+    margin: 2.5px 0;
+    padding-left: 4px;
+    align-items: center;
+
+    &:hover {
+      &::before {
+        content: "";
+        position: absolute;
+        left: 0;
+        width: 100%;
+        height: 1.4em;
+        border-radius: 2px;
+        background: rgba(136, 136, 136, 0.24);
+      }
+
+      .arrUi svg {
+        color: var(--txt-col) !important;
+      }
+    }
+
+    .arrUi {
+      margin-right: 0.4em;
+    }
+
+    .fa-chevron-right {
+      color: var(--dsb-col);
+    }
+  }
+}
+
+.disableIt {
+  color: var(--dsb-col) !important;
+}
+
+.dropcontent {
+  .dropdownmenu {
+    padding-left: 0.6em;
+  }
+}
+
+.navtitle {
+  flex-grow: 1;
+  font-size: 12.5px;
+  padding: 2px 0;
+  align-items: center;
+  position: relative;
+  font-weight: 400;
+}
+
+.sec1 {
+  display: flex;
+  padding: 0.5em 0.5em 0.5em 0;
+
+  .navIcon {
+    color: var(--gray-txt);
+    padding: 0 0.5em;
+    margin-left: 0.5em;
+    border-radius: 4px;
+    transition: all 200ms ease-in-out;
+  }
+
+  .path-bar {
+    flex-grow: 1;
+    overflow: scroll;
+    margin: 0 0.6em;
+    padding: 0 0.6em;
+    font-size: 0.8em;
+    color: var(--med-txt);
+    border: 1px solid var(--gray1);
+    position: relative;
+
+    .dirfbox {
+      position: absolute;
+      width: max-content;
+      padding-right: 1em;
+
+      .dirCont:hover {
+        .dirchev,
+        .dncont {
+          background: rgba(136, 136, 136, 0.3);
+        }
+      }
+
+      .dncont {
+        padding: 0 0.25em;
+        color: var(--med-dark);
+        height: 100%;
+        display: flex;
+        align-items: center;
+        box-sizing: border-box;
+        padding-bottom: 2px;
+      }
+
+      .dirchev {
+        padding: 0 2px;
+        margin-left: 1px;
+        height: 100%;
+      }
+    }
+
+    .path-field {
+      font-size: inherit;
+      background: inherit;
+      color: var(--med-dark);
+      letter-spacing: 1px;
+      box-sizing: border-box;
+      padding-bottom: 4px;
+      width: 100%;
+      height: 100%;
+      display: none;
+
+      &:active,
+      &:focus {
+        display: block;
+
+        & + .dirfbox {
+          display: none;
+        }
+      }
+    }
+
+    &:focus {
+      .dirfbox {
+        display: none;
+      }
+
+      .path-field {
+        display: block;
+      }
+    }
+  }
+
+  .srchbar {
+    width: 20%;
+    padding: 0.6em 0.2em;
+    font-size: 0.8em;
+    color: var(--txt-col);
+    border: 1px solid var(--gray1);
+    display: flex;
+
+    .searchIcon {
+      margin: 0 1em;
+    }
+
+    input {
+      width: 100%;
+      font-size: inherit;
+      background: inherit;
+      color: var(--med-dark);
+    }
+  }
+}
+
+.sec2 {
+  width: 100%;
+  height: 100%;
+  box-sizing: border-box;
+  display: flex;
+
+  .navpane {
+    width: 180px;
+    max-height: 100%;
+    padding: 0.4em 2px;
+    overflow-x: hidden;
+    overflow-y: scroll;
+    border: 0 solid var(--gray2);
+    border-right-width: medium;
+    position: relative;
+  }
+
+  .contentarea {
+    height: 100%;
+    flex-grow: 1;
+  }
+}
+
+.extcont {
+  position: absolute;
+  width: 100%;
+  height: max-content;
+
+  & > .dropdownmenu {
+    margin-bottom: 0.5em;
+  }
+}
+
+.contentarea {
+  display: flex;
+  flex-direction: column;
+
+  &:focus {
+    outline: none;
+  }
+
+  .contentwrap {
+    flex-grow: 1;
+    overflow-x: hidden;
+    overflow-y: scroll;
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
+
+  .conticon {
+    &[data-focus="true"] {
+      background: var(--focus-bg);
+      color: var(--dark-txt);
+    }
+
+    span {
+      width: 100%;
+      max-height: 32px;
+      text-align: center;
+      word-wrap: break-word;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+    }
+  }
+
+  .gridshow {
+    position: absolute;
+    top: 0;
+    left: 0;
+    box-sizing: border-box;
+    width: 100%;
+    display: grid;
+    padding: 0 1em;
+    font-size: 0.72em;
+    font-weight: 400;
+
+    &[data-size="lg"] {
+      --cwidth: 8.6em;
+      grid-column-gap: 1em;
+
+      .conticon {
+        padding: 0.2em;
+        margin: 0.6em 0;
+      }
+    }
+
+    .conticon {
+      align-self: flex-start;
+    }
+
+    grid-template-columns:
+      repeat(
+        auto-fill,
+        var(--cwidth)
+      );
+
+    justify-content: space-between;
+    align-items: flex-end;
+  }
+}
+
+.sec3 {
+  background: var(--bg2);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 2px 4px 2px 8px;
+
+  .item-count {
+    box-sizing: border-box;
+    padding: 0 8px;
+    height: 60%;
+    border: 0 solid var(--med-txt);
+    border-right-width: 1px;
+  }
+
+  .view-opts {
+    .viewicon {
+      &[data-open="true"] {
+        background: var(--focus-bg);
+      }
+    }
+  }
+}
+
+.hvtheme:hover {
+  background: var(--hover-bg);
+}
+
+
+/*
+ * ============================================================
+ * Ribbon
+ * ============================================================
+ */
+
+.ribbon-action {
+  cursor: pointer;
+  border-radius: 5px;
+  user-select: none;
+}
+
+.ribbon-action:hover {
+  background: var(--hover-bg);
+}
+
+
+/*
+ * ============================================================
+ * New 菜单
+ * ============================================================
+ */
+
+.file-new-menu {
+  position: absolute;
+
+  top: 70px;
+  left: 10px;
+
+  z-index: 10000;
+
+  min-width: 180px;
+
+  padding: 5px;
+
+  border-radius: 7px;
+
+  background: var(--bg1);
+
+  box-shadow:
+    0 10px 35px
+    rgba(0, 0, 0, 0.25);
+
+  border:
+    1px solid
+    rgba(128, 128, 128, 0.2);
+}
+
+.file-new-menu > div {
+  padding: 8px 12px;
+
+  border-radius: 5px;
+
+  font-size: 13px;
+
+  cursor: pointer;
+}
+
+.file-new-menu > div:hover {
+  background: var(--hover-bg);
+}
+
+
+/*
+ * ============================================================
+ * 右键菜单
+ * ============================================================
+ */
+
+.explorer-context-menu {
+  position: fixed;
+
+  z-index: 100000;
+
+  min-width: 170px;
+
+  padding: 5px;
+
+  border-radius: 7px;
+
+  background: var(--bg1);
+
+  color: var(--txt-col);
+
+  border:
+    1px solid
+    rgba(128, 128, 128, 0.2);
+
+  box-shadow:
+    0 10px 35px
+    rgba(0, 0, 0, 0.25);
+
+  user-select: none;
+}
+
+.explorer-context-item {
+  height: 32px;
+
+  padding: 0 12px;
+
+  display: flex;
+
+  align-items: center;
+
+  border-radius: 5px;
+
+  font-size: 13px;
+
+  cursor: pointer;
+
+  box-sizing: border-box;
+}
+
+.explorer-context-item:hover {
+  background: var(--hover-bg);
+}
+
+.explorer-context-item.danger:hover {
+  background:
+    rgba(255, 70, 70, 0.14);
+}
+
+.explorer-context-separator {
+  height: 1px;
+
+  margin: 5px 4px;
+
+  background:
+    rgba(128, 128, 128, 0.18);
+}
+
+
+/*
+ * ============================================================
+ * 操作 Dialog
+ * ============================================================
+ */
+
+.file-operation-dialog {
+  width: 420px;
+  max-width: 90vw;
+
+  padding: 18px;
+
+  border-radius: 10px;
+
+  background: var(--bg1);
+
+  box-shadow:
+    0 20px 60px
+    rgba(0, 0, 0, 0.35);
+}
+
+.file-operation-dialog-title {
+  font-size: 15px;
+  font-weight: 600;
+  margin-bottom: 14px;
+}
+
+.file-operation-dialog input {
+  width: 100%;
+
+  box-sizing: border-box;
+
+  padding: 9px 10px;
+
+  border:
+    1px solid
+    var(--gray1);
+
+  border-radius: 6px;
+
+  outline: none;
+
+  background: var(--bg2);
+
+  color: var(--txt-col);
+
+  font-size: 13px;
+}
+
+.file-operation-dialog input:focus {
+  border-color: var(--focus-bg);
+}
+
+.file-operation-dialog-footer {
+  display: flex;
+
+  justify-content: flex-end;
+
+  gap: 8px;
+
+  margin-top: 16px;
+}
+
+.file-operation-dialog-footer button {
+  padding: 7px 16px;
+
+  border: 0;
+
+  border-radius: 6px;
+
+  cursor: pointer;
+
+  background: var(--bg2);
+
+  color: var(--txt-col);
+}
+
+.file-operation-dialog-footer button:hover {
+  background: var(--hover-bg);
+}
+
+.file-operation-dialog-footer button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+
+/*
+ * ============================================================
+ * 编辑器 / 图片查看器
+ * ============================================================
+ */
+
+.file-editor-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 99999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.35);
+}
+
+.file-editor-window {
+  width: 80%;
+  height: 80%;
+  max-width: 1100px;
+  min-width: 500px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border-radius: 10px;
+  background: var(--bg, #ffffff);
+  box-shadow:
+    0 20px 60px
+    rgba(0, 0, 0, 0.35);
+}
+
+.file-editor-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  border-bottom:
+    1px solid
+    rgba(128, 128, 128, 0.2);
+}
+
+.file-editor-title {
+  font-size: 14px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.file-editor-close {
+  width: 32px;
+  height: 32px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  font-size: 22px;
+  cursor: pointer;
+}
+
+.file-editor-close:hover {
+  background:
+    rgba(128, 128, 128, 0.15);
+}
+
+.file-editor-path {
+  padding: 6px 14px;
+  font-size: 11px;
+  opacity: 0.6;
+  border-bottom:
+    1px solid
+    rgba(128, 128, 128, 0.15);
+}
+
+.file-editor-textarea {
+  flex: 1;
+  width: 100%;
+  resize: none;
+  border: 0;
+  outline: 0;
+  padding: 14px;
+  font-family: monospace;
+  font-size: 13px;
+  line-height: 1.5;
+  background: transparent;
+  color: inherit;
+}
+
+.file-editor-error {
+  padding: 8px 14px;
+  font-size: 12px;
+  background:
+    rgba(255, 60, 60, 0.12);
+}
+
+.file-editor-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 10px 14px;
+  border-top:
+    1px solid
+    rgba(128, 128, 128, 0.2);
+}
+
+.file-editor-footer button {
+  padding: 6px 16px;
+  border: 0;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.file-editor-footer button:hover {
+  background:
+    rgba(128, 128, 128, 0.15);
+}
+/*
+ * ============================================================
+ * Explorer Context Menu
+ * ============================================================
+ */
+
+.explorer-context-menu {
+  min-width: 180px;
+  padding: 5px;
+  border: 1px solid rgba(128, 128, 128, 0.25);
+  border-radius: 8px;
+
+  background: var(--bg1, #ffffff);
+  color: var(--txt-col);
+
+  box-shadow:
+    0 8px 30px rgba(0, 0, 0, 0.18),
+    0 2px 8px rgba(0, 0, 0, 0.12);
+
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+
+  user-select: none;
+}
+
+.explorer-context-item {
+  min-height: 32px;
+
+  padding: 0 12px;
+
+  display: flex;
+  align-items: center;
+
+  border-radius: 5px;
+
+  font-size: 12px;
+
+  cursor: pointer;
+
+  box-sizing: border-box;
+
+  transition:
+    background 100ms ease;
+}
+
+.explorer-context-item:hover {
+  background: var(--hover-bg);
+}
+
+.explorer-context-item.danger {
+  color: #e5484d;
+}
+
+.explorer-context-item.danger:hover {
+  background: rgba(229, 72, 77, 0.12);
+}
+
+.explorer-context-separator {
+  height: 1px;
+
+  margin: 5px 6px;
+
+  background: rgba(128, 128, 128, 0.2);
+}
+/* ============================================================
+ * File Explorer Context Menu
+ * ============================================================ */
+
+.explorer-context-menu {
+  position: fixed;
+  z-index: 100000;
+
+  min-width: 190px;
+  padding: 5px;
+
+  box-sizing: border-box;
+
+  background: var(--bg1, #ffffff);
+  color: var(--txt-col, #222);
+
+  border: 1px solid rgba(128, 128, 128, 0.25);
+  border-radius: 8px;
+
+  box-shadow:
+    0 8px 30px rgba(0, 0, 0, 0.18);
+
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+
+  font-size: 13px;
+}
+
+.explorer-context-menu-item {
+  display: flex;
+  align-items: center;
+
+  width: 100%;
+  min-height: 34px;
+
+  padding: 0 10px;
+
+  box-sizing: border-box;
+
+  border-radius: 5px;
+
+  cursor: pointer;
+
+  user-select: none;
+
+  color: var(--txt-col, #222);
+
+  transition:
+    background 100ms ease,
+    color 100ms ease;
+}
+
+.explorer-context-menu-item:hover {
+  background: var(--hover-bg, rgba(128, 128, 128, 0.15));
+}
+
+.explorer-context-menu-item.disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.explorer-context-menu-item.disabled:hover {
+  background: transparent;
+}
+
+.explorer-context-menu-icon {
+  width: 22px;
+  min-width: 22px;
+
+  margin-right: 8px;
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.explorer-context-menu-text {
+  flex: 1;
+
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.explorer-context-menu-separator {
+  height: 1px;
+
+  margin: 5px 4px;
+
+  background: rgba(128, 128, 128, 0.2);
+}
+
+
+/* ============================================================
+ * Explorer Dialog
+ * ============================================================ */
+
+.explorer-dialog-overlay {
+  position: fixed;
+
+  inset: 0;
+
+  z-index: 100001;
+
+  display: flex;
+
+  align-items: center;
+  justify-content: center;
+
+  box-sizing: border-box;
+
+  background: rgba(0, 0, 0, 0.28);
+
+  backdrop-filter: blur(2px);
+  -webkit-backdrop-filter: blur(2px);
+}
+
+.explorer-dialog {
+  width: 420px;
+  max-width: calc(100vw - 32px);
+
+  box-sizing: border-box;
+
+  padding: 20px;
+
+  border-radius: 10px;
+
+  background: var(--bg1, #ffffff);
+  color: var(--txt-col, #222);
+
+  border: 1px solid rgba(128, 128, 128, 0.22);
+
+  box-shadow:
+    0 20px 60px rgba(0, 0, 0, 0.30);
+
+  overflow: hidden;
+}
+
+.explorer-dialog-title {
+  display: flex;
+
+  align-items: center;
+
+  width: 100%;
+
+  margin-bottom: 16px;
+
+  font-size: 15px;
+
+  font-weight: 600;
+
+  color: var(--txt-col, #222);
+}
+
+.explorer-dialog-title-icon {
+  width: 28px;
+  min-width: 28px;
+
+  margin-right: 9px;
+
+  display: flex;
+
+  align-items: center;
+  justify-content: center;
+}
+
+.explorer-dialog-content {
+  width: 100%;
+
+  box-sizing: border-box;
+}
+
+.explorer-dialog-label {
+  display: block;
+
+  margin-bottom: 7px;
+
+  font-size: 12px;
+
+  color: var(--med-txt, #666);
+}
+
+.explorer-dialog-input {
+  display: block;
+
+  width: 100%;
+  height: 36px;
+
+  box-sizing: border-box;
+
+  padding: 0 10px;
+
+  border: 1px solid var(--gray1, rgba(128, 128, 128, 0.35));
+
+  border-radius: 6px;
+
+  outline: none;
+
+  background: var(--bg2, #ffffff);
+  color: var(--txt-col, #222);
+
+  font-family: inherit;
+  font-size: 13px;
+
+  transition:
+    border-color 120ms ease,
+    box-shadow 120ms ease;
+}
+
+.explorer-dialog-input:hover {
+  border-color: rgba(128, 128, 128, 0.55);
+}
+
+.explorer-dialog-input:focus {
+  border-color: var(--accent, #4d8dff);
+
+  box-shadow:
+    0 0 0 2px rgba(77, 141, 255, 0.15);
+}
+
+.explorer-dialog-error {
+  margin-top: 8px;
+
+  padding: 7px 9px;
+
+  box-sizing: border-box;
+
+  border-radius: 5px;
+
+  background: rgba(255, 70, 70, 0.10);
+
+  color: #d93025;
+
+  font-size: 12px;
+
+  line-height: 1.4;
+}
+
+.explorer-dialog-footer {
+  display: flex;
+
+  align-items: center;
+
+  justify-content: flex-end;
+
+  gap: 8px;
+
+  margin-top: 20px;
+}
+
+.explorer-dialog-button {
+  min-width: 72px;
+  height: 32px;
+
+  padding: 0 14px;
+
+  box-sizing: border-box;
+
+  border: 0;
+
+  border-radius: 6px;
+
+  background: transparent;
+
+  color: var(--txt-col, #222);
+
+  font-family: inherit;
+
+  font-size: 12px;
+
+  cursor: pointer;
+
+  transition:
+    background 100ms ease,
+    opacity 100ms ease;
+}
+
+.explorer-dialog-button:hover {
+  background: var(--hover-bg, rgba(128, 128, 128, 0.15));
+}
+
+.explorer-dialog-button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.explorer-dialog-button.primary {
+  background: var(--accent, #4d8dff);
+
+  color: #ffffff;
+}
+
+.explorer-dialog-button.primary:hover {
+  background: var(--accent-hover, #3d7fe8);
+}
+
+
+/* ============================================================
+ * New Menu
+ * ============================================================ */
+
+.explorer-new-menu {
+  position: fixed;
+
+  z-index: 100000;
+
+  min-width: 180px;
+
+  padding: 5px;
+
+  box-sizing: border-box;
+
+  background: var(--bg1, #ffffff);
+
+  color: var(--txt-col, #222);
+
+  border: 1px solid rgba(128, 128, 128, 0.25);
+
+  border-radius: 8px;
+
+  box-shadow:
+    0 8px 30px rgba(0, 0, 0, 0.18);
+
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+}
+
+.explorer-new-menu-item {
+  display: flex;
+
+  align-items: center;
+
+  min-height: 34px;
+
+  padding: 0 10px;
+
+  border-radius: 5px;
+
+  cursor: pointer;
+
+  user-select: none;
+
+  font-size: 13px;
+
+  transition:
+    background 100ms ease;
+}
+
+.explorer-new-menu-item:hover {
+  background: var(--hover-bg, rgba(128, 128, 128, 0.15));
+}
+
+.explorer-new-menu-icon {
+  width: 22px;
+  min-width: 22px;
+
+  margin-right: 8px;
+
+  display: flex;
+
+  align-items: center;
+  justify-content: center;
+}
+
+.explorer-new-menu-text {
+  flex: 1;
+
+  white-space: nowrap;
+}
+
+
+/* ============================================================
+ * Rename / Create dialog compatibility
+ * ============================================================ */
+
+.file-dialog {
+  position: fixed;
+
+  inset: 0;
+
+  z-index: 100001;
+
+  display: flex;
+
+  align-items: center;
+  justify-content: center;
+
+  background: rgba(0, 0, 0, 0.28);
+}
+
+.file-dialog-window {
+  width: 420px;
+
+  max-width: calc(100vw - 32px);
+
+  box-sizing: border-box;
+
+  padding: 20px;
+
+  border-radius: 10px;
+
+  background: var(--bg1, #ffffff);
+
+  color: var(--txt-col, #222);
+
+  border: 1px solid rgba(128, 128, 128, 0.22);
+
+  box-shadow:
+    0 20px 60px rgba(0, 0, 0, 0.30);
+}
+
+.file-dialog-title {
+  margin-bottom: 16px;
+
+  font-size: 15px;
+
+  font-weight: 600;
+}
+
+.file-dialog-input {
+  width: 100%;
+
+  height: 36px;
+
+  padding: 0 10px;
+
+  box-sizing: border-box;
+
+  border: 1px solid var(--gray1, rgba(128, 128, 128, 0.35));
+
+  border-radius: 6px;
+
+  outline: none;
+
+  background: var(--bg2, #ffffff);
+
+  color: var(--txt-col, #222);
+
+  font-family: inherit;
+
+  font-size: 13px;
+}
+
+.file-dialog-input:focus {
+  border-color: var(--accent, #4d8dff);
+
+  box-shadow:
+    0 0 0 2px rgba(77, 141, 255, 0.15);
+}
+
+.file-dialog-actions {
+  display: flex;
+
+  justify-content: flex-end;
+
+  gap: 8px;
+
+  margin-top: 20px;
+}
+
+.file-dialog-actions button {
+  min-width: 72px;
+
+  height: 32px;
+
+  padding: 0 14px;
+
+  border: 0;
+
+  border-radius: 6px;
+
+  cursor: pointer;
+
+  background: transparent;
+
+  color: var(--txt-col, #222);
+}
+
+.file-dialog-actions button:hover {
+  background: var(--hover-bg, rgba(128, 128, 128, 0.15));
+}
+
+.file-dialog-actions button.primary {
+  background: var(--accent, #4d8dff);
+
+  color: white;
+}
+
+.file-dialog-actions button.primary:hover {
+  background: var(--accent-hover, #3d7fe8);
+}

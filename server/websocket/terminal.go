@@ -1,134 +1,357 @@
 package websocket
 
-
 import (
+	"encoding/json"
+	"net/http"
+	"os"
+	"os/exec"
+	"sync"
+	"syscall"
 
-    "os/exec"
-
-    "github.com/gin-gonic/gin"
-
-    "github.com/creack/pty"
-
-    gorilla "github.com/gorilla/websocket"
-
+	"github.com/creack/pty"
+	"github.com/gin-gonic/gin"
+	gorilla "github.com/gorilla/websocket"
 )
 
+var terminalUpgrader = gorilla.Upgrader{
+	CheckOrigin: func(r *http.Request) bool {
+		return true
+	},
+}
+
+// ============================================================
+// WebSocket -> Terminal message
+// ============================================================
+
+type TerminalMessage struct {
+	Type string `json:"type"`
+
+	Data string `json:"data"`
+
+	Cols uint16 `json:"cols"`
+	Rows uint16 `json:"rows"`
+}
+
+// ============================================================
+// Terminal
+//
+// 每次调用 Terminal：
+//
+// WebSocket
+//     ↓
+// PTY
+//     ↓
+// /bin/bash -l
+//
+// WebSocket 关闭：
+//     ↓
+// PTY 关闭
+//     ↓
+// bash session 销毁
+//
+// 下一次重新打开 Terminal：
+//     ↓
+// 全新的 bash session
+// ============================================================
+
+func Terminal(c *gin.Context) {
+
+	// ========================================================
+	// WebSocket Upgrade
+	// ========================================================
+
+	ws, err := terminalUpgrader.Upgrade(
+		c.Writer,
+		c.Request,
+		nil,
+	)
+
+	if err != nil {
+		return
+	}
+
+	defer ws.Close()
+
+	// ========================================================
+	// 创建新的 bash
+	// ========================================================
 
+	cmd := exec.Command(
+		"/bin/bash",
+		"-l",
+	)
 
-func Terminal(c *gin.Context){
+	// 保留当前环境变量
+	cmd.Env = os.Environ()
 
+	// 创建独立 session
+	cmd.SysProcAttr = &syscall.SysProcAttr{
+		Setsid: true,
+	}
 
-    ws,err:=upgrader.Upgrade(
+	// ========================================================
+	// 创建 PTY
+	// ========================================================
 
-        c.Writer,
+	ptmx, err := pty.Start(cmd)
 
-        c.Request,
+	if err != nil {
 
-        nil,
+		_ = ws.WriteMessage(
+			gorilla.TextMessage,
+			[]byte(
+				"\r\nFailed to start terminal: "+
+					err.Error()+
+					"\r\n",
+			),
+		)
 
-    )
+		return
+	}
 
+	// 最终一定关闭 PTY
+	defer ptmx.Close()
 
-    if err!=nil{
+	// ========================================================
+	// WebSocket 写锁
+	// ========================================================
 
-        return
+	var wsWriteMu sync.Mutex
 
-    }
+	writeWS := func(
+		messageType int,
+		data []byte,
+	) error {
 
+		wsWriteMu.Lock()
+		defer wsWriteMu.Unlock()
 
-    defer ws.Close()
+		return ws.WriteMessage(
+			messageType,
+			data,
+		)
+	}
 
+	// ========================================================
+	// PTY -> WebSocket
+	// ========================================================
 
+	ptyDone := make(chan struct{})
 
-    cmd:=exec.Command(
+	go func() {
 
-        "/bin/bash",
+		defer close(ptyDone)
 
-        "-l",
+		buf := make([]byte, 8192)
 
-    )
+		for {
 
+			n, err := ptmx.Read(buf)
 
+			if n > 0 {
 
+				if err := writeWS(
+					gorilla.BinaryMessage,
+					buf[:n],
+				); err != nil {
 
-    ptmx,err:=pty.Start(cmd)
+					return
+				}
+			}
 
+			if err != nil {
+				return
+			}
+		}
 
-    if err!=nil{
+	}()
 
-        return
+	// ========================================================
+	// WebSocket -> PTY
+	// ========================================================
 
-    }
+	readDone := make(chan struct{})
 
+	go func() {
 
+		defer close(readDone)
 
-    defer ptmx.Close()
+		for {
 
+			messageType, message, err :=
+				ws.ReadMessage()
 
+			if err != nil {
+				return
+			}
 
+			if messageType != gorilla.TextMessage &&
+				messageType != gorilla.BinaryMessage {
 
-    // shell输出 -> websocket
+				continue
+			}
 
-    go func(){
+			// ==================================================
+			// 解析消息
+			// ==================================================
 
+			var msg TerminalMessage
 
-        buf:=make([]byte,4096)
+			if err := json.Unmarshal(
+				message,
+				&msg,
+			); err != nil {
 
+				/*
+				 * 兼容旧客户端：
+				 *
+				 * 如果不是 JSON，
+				 * 就直接当成终端输入。
+				 */
 
-        for{
+				if len(message) > 0 {
 
+					_, _ = ptmx.Write(
+						message,
+					)
 
-            n,err:=ptmx.Read(buf)
+				}
 
+				continue
+			}
 
-            if err!=nil{
+			// ==================================================
+			// INPUT
+			// ==================================================
 
-                return
+			if msg.Type == "input" {
 
-            }
+				if msg.Data == "" {
+					continue
+				}
 
+				/*
+				 * 注意：
+				 *
+				 * 这里直接写入 PTY。
+				 *
+				 * 所以：
+				 *
+				 * Ctrl+C
+				 * Ctrl+D
+				 * Ctrl+Z
+				 * ESC
+				 * F1-F12
+				 * Backspace
+				 * Enter
+				 *
+				 * 都会正常进入 Linux PTY。
+				 */
 
-            ws.WriteMessage(
+				_, err = ptmx.Write(
+					[]byte(msg.Data),
+				)
 
-                gorilla.TextMessage,
+				if err != nil {
+					return
+				}
 
-                buf[:n],
+				continue
+			}
 
-            )
+			// ==================================================
+			// RESIZE
+			// ==================================================
 
+			if msg.Type == "resize" {
 
-        }
+				if msg.Cols == 0 ||
+					msg.Rows == 0 {
 
+					continue
+				}
 
-    }()
+				/*
+				 * 只改变 PTY 大小。
+				 *
+				 * 不发送给 bash。
+				 */
 
+				err := pty.Setsize(
+					ptmx,
+					&pty.Winsize{
+						Cols: msg.Cols,
+						Rows: msg.Rows,
+					},
+				)
 
+				if err != nil {
+					continue
+				}
 
+				continue
+			}
+		}
 
+	}()
 
-    // websocket输入 -> shell
+	// ========================================================
+	// 等待
+	//
+	// 两种情况：
+	//
+	// 1. bash 退出
+	// 2. WebSocket 断开
+	// ========================================================
 
-    for{
+	select {
 
+	case <-ptyDone:
 
-        _,msg,err:=ws.ReadMessage()
+		// bash / PTY 已退出
 
+	case <-readDone:
 
-        if err!=nil{
+		// 浏览器关闭 WebSocket
+	}
 
-            break
+	// ========================================================
+	// 销毁整个 bash session
+	// ========================================================
 
-        }
+	if cmd.Process != nil {
 
+		/*
+		 * 因为 Setsid=true，
+		 *
+		 * bash PID
+		 * =
+		 * session leader
+		 * =
+		 * process group leader
+		 *
+		 * 所以使用负 PID：
+		 *
+		 * -PID
+		 *
+		 * 可以向整个 process group 发送信号。
+		 */
 
+		pgid := -cmd.Process.Pid
 
-        ptmx.Write(msg)
+		// 先发送 SIGHUP
+		_ = syscall.Kill(
+			pgid,
+			syscall.SIGHUP,
+		)
 
+		// 再确保 bash 结束
+		_ = cmd.Process.Kill()
+	}
 
-    }
+	// ========================================================
+	// 关闭 PTY
+	// ========================================================
 
-
-
-    cmd.Process.Kill()
-
+	_ = ptmx.Close()
 }

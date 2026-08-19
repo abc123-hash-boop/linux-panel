@@ -1,148 +1,113 @@
 package api
 
-
 import (
-
 	"net/http"
-
 	"os"
+	"path/filepath"
+	"strings"
 
 	"github.com/gin-gonic/gin"
-
 )
 
-
-
-func FileRead(c *gin.Context){
-
-
+func FileRead(c *gin.Context) {
 
 	path := c.Query("path")
 
-
-
-	if path==""{
-
+	if path == "" {
 
 		c.JSON(
-
-			400,
-
+			http.StatusBadRequest,
 			gin.H{
-
-				"error":"path empty",
-
+				"error": "path empty",
 			},
-
 		)
 
-
 		return
-
 	}
 
+	info, err := os.Stat(path)
 
-
-
-
-	info,err:=os.Stat(path)
-
-
-
-	if err!=nil || info.IsDir(){
-
+	if err != nil || info.IsDir() {
 
 		c.JSON(
-
-			400,
-
+			http.StatusBadRequest,
 			gin.H{
-
-				"error":"not file",
-
+				"error": "not file",
 			},
-
 		)
 
-
 		return
-
 	}
 
+	/*
+	 * ========================================================
+	 * 只允许文本文件
+	 * ========================================================
+	 */
 
-
-
-
-	data,err:=os.ReadFile(path)
-
-
-
-	if err!=nil{
-
-
-		c.JSON(
-
-			500,
-
-			gin.H{
-
-				"error":err.Error(),
-
-			},
-
-		)
-
-
-		return
-
-	}
-
-
-
-
-
-	// 限制大小 2MB
-
-	if len(data)>2*1024*1024{
-
-
-		c.JSON(
-
-			400,
-
-			gin.H{
-
-				"error":"file too large",
-
-			},
-
-		)
-
-
-		return
-
-	}
-
-
-
-
-
-	c.JSON(
-
-		http.StatusOK,
-
-		gin.H{
-
-
-			"path":path,
-
-
-			"content":string(data),
-
-
-		},
-
+	ext := strings.ToLower(
+		filepath.Ext(path),
 	)
 
+	switch ext {
 
+	case ".js",
+		".jsx",
+		".json",
+		".txt",
+		".log":
+
+		// 允许
+
+	default:
+
+		c.JSON(
+			http.StatusBadRequest,
+			gin.H{
+				"error": "unsupported text file type",
+			},
+		)
+
+		return
+	}
+
+	/*
+	 * ========================================================
+	 * 限制文件大小
+	 * ========================================================
+	 */
+
+	if info.Size() > 2*1024*1024 {
+
+		c.JSON(
+			http.StatusBadRequest,
+			gin.H{
+				"error": "file too large",
+			},
+		)
+
+		return
+	}
+
+	data, err := os.ReadFile(path)
+
+	if err != nil {
+
+		c.JSON(
+			http.StatusInternalServerError,
+			gin.H{
+				"error": err.Error(),
+			},
+		)
+
+		return
+	}
+
+	c.JSON(
+		http.StatusOK,
+		gin.H{
+			"path":    path,
+			"content": string(data),
+		},
+	)
 }

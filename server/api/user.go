@@ -1,7 +1,6 @@
 package api
 
 import (
-
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -11,29 +10,21 @@ import (
 	"panel/auth"
 
 	"golang.org/x/crypto/bcrypt"
-
 )
 
-
-
-func ChangePassword(c *gin.Context){
-
-
+func ChangePassword(c *gin.Context) {
 
 	username :=
 		auth.GetUser(
 			c.Request,
 		)
 
-
-
-	if username==""{
-
+	if username == "" {
 
 		c.JSON(
 			http.StatusUnauthorized,
 			gin.H{
-				"error":"unauthorized",
+				"error": "unauthorized",
 			},
 		)
 
@@ -41,170 +32,107 @@ func ChangePassword(c *gin.Context){
 
 	}
 
-
-
-
-	var data struct{
-
-
+	var data struct {
 		OldPassword string `json:"old_password"`
 
 		NewPassword string `json:"new_password"`
-
-
 	}
 
+	if err := c.ShouldBindJSON(&data); err != nil {
 
+		c.JSON(400, gin.H{
 
-
-	if err:=c.ShouldBindJSON(&data);err!=nil{
-
-
-		c.JSON(400,gin.H{
-
-			"error":"bad request",
-
+			"error": "bad request",
 		})
-
 
 		return
 
 	}
-
-
-
-
 
 	var hash string
 
-
-
 	err :=
-	database.DB.QueryRow(
+		database.DB.QueryRow(
 
-		"SELECT password FROM users WHERE username=?",
+			"SELECT password FROM users WHERE username=?",
 
-		username,
+			username,
+		).Scan(&hash)
 
-	).Scan(&hash)
+	if err != nil {
 
+		c.JSON(500, gin.H{
 
-
-	if err!=nil{
-
-
-		c.JSON(500,gin.H{
-
-			"error":"user not found",
-
+			"error": "user not found",
 		})
-
 
 		return
 
 	}
-
-
-
-
 
 	// 验证旧密码
 
 	err =
-	bcrypt.CompareHashAndPassword(
+		bcrypt.CompareHashAndPassword(
 
-		[]byte(hash),
+			[]byte(hash),
 
-		[]byte(data.OldPassword),
+			[]byte(data.OldPassword),
+		)
 
-	)
+	if err != nil {
 
+		c.JSON(400, gin.H{
 
-
-
-	if err!=nil{
-
-
-		c.JSON(400,gin.H{
-
-			"error":"old password wrong",
-
+			"error": "old password wrong",
 		})
-
 
 		return
 
 	}
-
-
-
-
-
 
 	// 新密码加密
 
+	newHash, _ :=
+		bcrypt.GenerateFromPassword(
 
-	newHash,_ :=
-	bcrypt.GenerateFromPassword(
+			[]byte(data.NewPassword),
 
-		[]byte(data.NewPassword),
+			bcrypt.DefaultCost,
+		)
 
-		bcrypt.DefaultCost,
+	_, err =
+		database.DB.Exec(
 
-	)
+			"UPDATE users SET password=? WHERE username=?",
 
+			string(newHash),
 
+			username,
+		)
 
+	if err != nil {
 
+		c.JSON(500, gin.H{
 
-	_,err =
-	database.DB.Exec(
-
-		"UPDATE users SET password=? WHERE username=?",
-
-		string(newHash),
-
-		username,
-
-	)
-
-
-
-	if err!=nil{
-
-
-		c.JSON(500,gin.H{
-
-			"error":"update failed",
-
+			"error": "update failed",
 		})
-
 
 		return
 
 	}
 
+	c.JSON(200, gin.H{
 
-
-
-
-	c.JSON(200,gin.H{
-
-		"message":"password changed",
-
+		"message": "password changed",
 	})
 
-
-
 }
-func Logout(c *gin.Context){
-
+func Logout(c *gin.Context) {
 
 	auth.Logout(
 		c.Request,
 	)
-
-
 
 	c.SetCookie(
 
@@ -221,16 +149,11 @@ func Logout(c *gin.Context){
 		false,
 
 		true,
-
 	)
 
+	c.JSON(200, gin.H{
 
-
-	c.JSON(200,gin.H{
-
-		"message":"logout",
-
+		"message": "logout",
 	})
-
 
 }

@@ -1610,7 +1610,22 @@ const ContextMenu = ({
             className="explorer-context-separator"
           />
 
-
+	{
+	  !isDirectory(menu.file)
+	    ? (
+	      <div
+	        className="explorer-context-item"
+	        onClick={() =>
+	          menu.onDownload()
+	        }
+	      >
+	        <span>
+	          下载
+	        </span>
+	      </div>
+	    )
+	    : null
+	}
           <div
             className="explorer-context-item"
             onClick={() =>
@@ -2368,7 +2383,27 @@ export const Explorer = () => {
     });
 
   };
+  /*
+   * ==========================================================
+   * 下载文件
+   * ==========================================================
+ */
+  const downloadFile = (
+	  filePath
+  ) => {
 
+	  setContextMenu(null);
+
+
+	  window.open(
+		  "/api/file/raw?download=1&path=" +
+		  encodeURIComponent(
+			  filePath
+		  ),
+		  "_blank"
+		);
+
+  };
 
   /*
    * ==========================================================
@@ -2702,6 +2737,22 @@ export const Explorer = () => {
 
       filePath,
 
+
+          onDownload: () => {
+
+            if (
+              file &&
+              filePath &&
+              !isDirectory(file)
+            ) {
+
+              downloadFile(
+                filePath
+              );
+
+            }
+
+          },
       onOpen: () => {
 
         setContextMenu(null);
@@ -3029,6 +3080,9 @@ export const Explorer = () => {
               y: 100,
 
               file: null,
+
+		onDownload:
+		    () => {},
 
               onNewFile:
                 createFile,

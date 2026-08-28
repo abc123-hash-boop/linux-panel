@@ -57,7 +57,7 @@ const taskReducer = (state = defState, action) => {
     case "TASKWIDG":
       return {
         ...state,
-        widgets: action.payload == "true",
+        widgets: action.payload == "false",
       };
     case "TASKAUDO":
       return {

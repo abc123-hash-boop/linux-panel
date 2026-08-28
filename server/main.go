@@ -137,22 +137,134 @@ func main() {
 			"/file/mkdir",
 			panelApi.FileMkdir,
 		)
-		
+
 		protected.POST(
 			"/file/create",
 			panelApi.FileCreate,
 		)
-		
+
 		protected.POST(
 			"/file/rename",
 			panelApi.FileRename,
 		)
-		
+
 		protected.POST(
 			"/file/delete",
 			panelApi.FileDelete,
 		)
-	
+		protected.GET(
+			"/docker/info",
+			panelApi.DockerInfo,
+		)
+		protected.GET(
+			"/docker/containers",
+			panelApi.DockerContainerList,
+		)
+		protected.POST(
+			"/docker/container/start/:id",
+			panelApi.DockerContainerStart,
+		)
+		protected.POST(
+			"/docker/container/stop/:id",
+			panelApi.DockerContainerStop,
+		)
+		protected.POST(
+			"/docker/container/restart/:id",
+			panelApi.DockerContainerRestart,
+		)
+		protected.DELETE(
+			"/docker/container/:id",
+			panelApi.DockerContainerRemove,
+		)
+		protected.POST(
+			"/docker/container/create",
+			panelApi.DockerContainerCreate,
+		)
+		protected.POST(
+			"/docker/compose/upload",
+			panelApi.DockerComposeUpload,
+		)
+		protected.POST(
+			"/docker/compose/:name/up",
+			panelApi.DockerComposeUp,
+		)
+		protected.POST(
+			"/docker/compose/:name/down",
+			panelApi.DockerComposeDown,
+		)
+		protected.GET(
+			"/docker/compose/list",
+			panelApi.DockerComposeList,
+		)
+		protected.POST(
+			"/docker/compose/:name/restart",
+			panelApi.DockerComposeRestart,
+		)
+		protected.GET(
+			"/docker/compose/:name/logs",
+			panelApi.DockerComposeLogs,
+		)
+		protected.GET(
+			"/docker/images",
+			panelApi.DockerImageList,
+		)
+		protected.POST(
+			"/docker/image/pull",
+			panelApi.DockerImagePull,
+		)
+		protected.GET(
+			"/docker/image/pull/status/:id",
+			panelApi.DockerImagePullStatus,
+		)
+		protected.DELETE(
+			"/docker/image/:id",
+			panelApi.DockerImageRemove,
+		)
+		protected.POST(
+			"/docker/container/exec",
+			panelApi.DockerContainerExec,
+		)
+		protected.GET(
+			"/docker/volumes",
+			panelApi.DockerVolumeList,
+		)
+		protected.POST(
+			"/docker/volume",
+			panelApi.DockerVolumeCreate,
+		)
+		protected.DELETE(
+			"/docker/volume/:name",
+			panelApi.DockerVolumeRemove,
+		)
+		protected.GET(
+			"/docker/networks",
+			panelApi.DockerNetworkList,
+		)
+
+		protected.GET(
+			"/docker/network/:id",
+			panelApi.DockerNetworkInspect,
+		)
+
+		protected.POST(
+			"/docker/network",
+			panelApi.DockerNetworkCreate,
+		)
+
+		protected.DELETE(
+			"/docker/network/:id",
+			panelApi.DockerNetworkRemove,
+		)
+
+		protected.POST(
+			"/docker/network/:id/connect",
+			panelApi.DockerNetworkConnect,
+		)
+
+		protected.POST(
+			"/docker/network/:id/disconnect",
+			panelApi.DockerNetworkDisconnect,
+		)
 	}
 
 	/*
@@ -171,6 +283,16 @@ func main() {
 		"/ws/terminal",
 		middleware.AuthWS(),
 		websocket.Terminal,
+	)
+	r.GET(
+		"/ws/docker/pull/:id",
+		middleware.AuthWS(),
+		websocket.DockerPull,
+	)
+	r.GET(
+		"/ws/docker/exec/:id",
+		middleware.AuthWS(),
+		websocket.DockerExecTerminal,
 	)
 
 	/*

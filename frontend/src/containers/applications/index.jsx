@@ -11,6 +11,7 @@ export * from "./apps/store";
 export * from "./apps/taskmanager";
 export * from "./apps/terminal";
 export * from "./apps/whiteboard";
+export { default as Docker } from "./apps/docker";
 
 export const ScreenPreview = () => {
   const tasks = useSelector((state) => state.taskbar);

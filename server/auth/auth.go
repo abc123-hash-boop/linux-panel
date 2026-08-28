@@ -125,16 +125,12 @@ func GetUser(
 }
 func Logout(r *http.Request) {
 
-
-	cookie,err :=
+	cookie, err :=
 		r.Cookie("session")
-
 
 	if err != nil {
 		return
 	}
-
-
 
 	lock.Lock()
 
@@ -144,6 +140,5 @@ func Logout(r *http.Request) {
 	)
 
 	lock.Unlock()
-
 
 }

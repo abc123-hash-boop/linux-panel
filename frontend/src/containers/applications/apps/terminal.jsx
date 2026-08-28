@@ -6,7 +6,6 @@ import React, {
 
 import {
   useSelector,
-  useDispatch,
 } from "react-redux";
 
 import {
@@ -27,33 +26,41 @@ import {
 export const WnTerminal = () => {
 
   /*
-   * =========================================================
+   * ============================================================
    * Redux
-   * =========================================================
+   * ============================================================
    */
 
   const wnapp = useSelector(
     (state) => state.apps.terminal
   );
 
-  const dispatch = useDispatch();
-
 
   /*
-   * =========================================================
+   * ============================================================
    * Refs
-   * =========================================================
+   * ============================================================
    */
 
-  const terminalRef = useRef(null);
+  const terminalRef =
+    useRef(null);
 
   const terminalInstance =
+    useRef(null);
+
+  const fitAddonRef =
     useRef(null);
 
   const socketRef =
     useRef(null);
 
-  const fitAddonRef =
+  const socketModeRef =
+    useRef(null);
+
+  const socketGenerationRef =
+    useRef(0);
+
+  const resizeObserverRef =
     useRef(null);
 
   const resizeFrameRef =
@@ -62,21 +69,42 @@ export const WnTerminal = () => {
   const resizeTimerRef =
     useRef(null);
 
-  /*
-   * 防止关闭窗口时：
-   *
-   * WebSocket onclose
-   * 又被当成异常断开
-   */
-
-  const intentionalCloseRef =
+  const destroyedRef =
     useRef(false);
 
 
   /*
-   * =========================================================
+   * ============================================================
+   * 当前 Terminal 模式
+   *
+   * null       = 未连接
+   * "normal"   = 普通 Terminal
+   * "docker"   = Docker Terminal
+   * ============================================================
+   */
+
+  const currentMode =
+    wnapp &&
+    wnapp.dockerContainer
+      ? "docker"
+      : "normal";
+
+
+  /*
+   * Docker Container ID
+   */
+
+  const dockerContainer =
+    wnapp &&
+    wnapp.dockerContainer
+      ? wnapp.dockerContainer
+      : null;
+
+
+  /*
+   * ============================================================
    * Window title
-   * =========================================================
+   * ============================================================
    */
 
   const [
@@ -86,32 +114,82 @@ export const WnTerminal = () => {
 
 
   /*
-   * =========================================================
+   * ============================================================
    * WebSocket URL
-   *
-   * HTTPS -> WSS
-   * HTTP  -> WS
-   * =========================================================
+   * ============================================================
    */
 
-  const getWebSocketURL = () => {
+  const getWebSocketURL = (
+    containerId
+  ) => {
 
     const protocol =
       window.location.protocol === "https:"
         ? "wss:"
         : "ws:";
 
+
+    if (containerId) {
+
+      return (
+        `${protocol}//${window.location.host}` +
+        `/ws/docker/exec/${encodeURIComponent(containerId)}`
+      );
+
+    }
+
+
     return (
-      `${protocol}//${window.location.host}/ws/terminal`
+      `${protocol}//${window.location.host}` +
+      `/ws/terminal`
     );
 
   };
 
 
   /*
-   * =========================================================
+   * ============================================================
+   * 清空 Terminal
+   * ============================================================
+   */
+
+  const clearTerminal = () => {
+
+    const term =
+      terminalInstance.current;
+
+
+    if (!term) {
+      return;
+    }
+
+
+    try {
+
+      term.clear();
+
+      term.write(
+        "\x1b[2J\x1b[H"
+      );
+
+      term.reset();
+
+    } catch (e) {
+
+      console.warn(
+        "[Terminal] clear failed:",
+        e
+      );
+
+    }
+
+  };
+
+
+  /*
+   * ============================================================
    * Fit xterm
-   * =========================================================
+   * ============================================================
    */
 
   const fitTerminal = () => {
@@ -137,21 +215,9 @@ export const WnTerminal = () => {
     }
 
 
-    const width =
-      container.clientWidth;
-
-    const height =
-      container.clientHeight;
-
-
-    /*
-     * 窗口隐藏 / 尚未完成 layout 时，
-     * 不进行 fit。
-     */
-
     if (
-      width <= 0 ||
-      height <= 0
+      container.clientWidth <= 0 ||
+      container.clientHeight <= 0
     ) {
 
       return;
@@ -163,11 +229,11 @@ export const WnTerminal = () => {
 
       fitAddon.fit();
 
-    } catch (error) {
+    } catch (e) {
 
       console.warn(
         "[Terminal] fit failed:",
-        error
+        e
       );
 
     }
@@ -176,15 +242,16 @@ export const WnTerminal = () => {
 
 
   /*
-   * =========================================================
-   * Send PTY resize
+   * ============================================================
+   * 普通 Terminal resize
    *
-   * resize 是控制消息，
-   * 不直接进入 bash。
-   * =========================================================
+   * 只有 normal 模式允许发送 JSON。
+   *
+   * Docker 模式绝对不会进入这里。
+   * ============================================================
    */
 
-  const sendResize = () => {
+  const sendNormalResize = () => {
 
     const ws =
       socketRef.current;
@@ -193,14 +260,35 @@ export const WnTerminal = () => {
       terminalInstance.current;
 
 
+    /*
+     * 这里直接判断 socketMode。
+     *
+     * 不再使用 connectedDockerRef。
+     */
+
     if (
-      !ws ||
-      ws.readyState !== WebSocket.OPEN ||
-      !term
+      socketModeRef.current !==
+      "normal"
     ) {
 
       return;
 
+    }
+
+
+    if (
+      !ws ||
+      ws.readyState !==
+      WebSocket.OPEN
+    ) {
+
+      return;
+
+    }
+
+
+    if (!term) {
+      return;
     }
 
 
@@ -224,11 +312,11 @@ export const WnTerminal = () => {
         })
       );
 
-    } catch (error) {
+    } catch (e) {
 
       console.warn(
-        "[Terminal] resize send failed:",
-        error
+        "[Terminal] normal resize failed:",
+        e
       );
 
     }
@@ -237,24 +325,12 @@ export const WnTerminal = () => {
 
 
   /*
-   * =========================================================
-   * Resize terminal
-   *
-   * Win11React 拖动窗口时会产生大量 resize。
-   *
-   * requestAnimationFrame
-   * +
-   * debounce
-   *
-   * 防止疯狂调用 fit / resize。
-   * =========================================================
+   * ============================================================
+   * Resize
+   * ============================================================
    */
 
   const resizeTerminal = () => {
-
-    /*
-     * 取消之前的 animation frame
-     */
 
     if (
       resizeFrameRef.current
@@ -270,16 +346,12 @@ export const WnTerminal = () => {
     resizeFrameRef.current =
       requestAnimationFrame(() => {
 
-        /*
-         * 首先让 xterm 根据实际 DOM 尺寸重新计算
-         */
+        resizeFrameRef.current =
+          null;
+
 
         fitTerminal();
 
-
-        /*
-         * 再稍微延迟发送 PTY resize。
-         */
 
         if (
           resizeTimerRef.current
@@ -295,9 +367,16 @@ export const WnTerminal = () => {
         resizeTimerRef.current =
           setTimeout(() => {
 
-            sendResize();
+            resizeTimerRef.current =
+              null;
 
-          }, 30);
+            /*
+             * Docker 模式这里什么都不会发送。
+             */
+
+            sendNormalResize();
+
+          }, 50);
 
       });
 
@@ -305,52 +384,144 @@ export const WnTerminal = () => {
 
 
   /*
-   * =========================================================
+   * ============================================================
+   * 关闭 WebSocket
+   * ============================================================
+   */
+
+  const closeWebSocket = () => {
+
+    const ws =
+      socketRef.current;
+
+
+    socketRef.current =
+      null;
+
+    socketModeRef.current =
+      null;
+
+
+    if (!ws) {
+      return;
+    }
+
+
+    /*
+     * 先解除事件。
+     *
+     * 防止旧连接影响新连接。
+     */
+
+    ws.onopen = null;
+    ws.onmessage = null;
+    ws.onerror = null;
+    ws.onclose = null;
+
+
+    try {
+
+      if (
+        ws.readyState ===
+          WebSocket.OPEN ||
+        ws.readyState ===
+          WebSocket.CONNECTING
+      ) {
+
+        ws.close();
+
+      }
+
+    } catch (e) {}
+
+  };
+
+
+  /*
+   * ============================================================
    * Connect WebSocket
-   * =========================================================
+   * ============================================================
    */
 
   const connectWebSocket = (
-    term
+    term,
+    containerId
   ) => {
 
     /*
-     * 如果存在旧连接，
-     * 先关闭。
+     * 新 generation
      */
 
-    if (
-      socketRef.current
-    ) {
+    socketGenerationRef.current += 1;
 
-      try {
+    const generation =
+      socketGenerationRef.current;
 
-        socketRef.current.close();
 
-      } catch (e) {}
+    /*
+     * 关闭旧连接
+     */
 
-      socketRef.current =
-        null;
+    closeWebSocket();
+
+
+    /*
+     * 当前模式。
+     *
+     * 这个 Ref 在创建 WebSocket 之前
+     * 就已经设置。
+     *
+     * 因此 resize / keyboard 不会串模式。
+     */
+
+    const mode =
+      containerId
+        ? "docker"
+        : "normal";
+
+
+    socketModeRef.current =
+      mode;
+
+
+    const url =
+      getWebSocketURL(
+        containerId
+      );
+
+
+    console.log(
+      "[Terminal] connect:",
+      mode,
+      containerId || ""
+    );
+
+
+    let ws;
+
+
+    try {
+
+      ws =
+        new WebSocket(
+          url
+        );
+
+    } catch (e) {
+
+      console.error(
+        "[Terminal] WebSocket create failed:",
+        e
+      );
+
+      return;
 
     }
 
 
-    const url =
-      getWebSocketURL();
-
-
-    console.log(
-      "[Terminal] Connecting:",
-      url
-    );
-
-
-    const ws =
-      new WebSocket(url);
-
-
     /*
-     * 后端 PTY 输出可以使用 binary。
+     * Docker TTY 和普通 Terminal
+     * 都使用 binary。
      */
 
     ws.binaryType =
@@ -362,37 +533,65 @@ export const WnTerminal = () => {
 
 
     /*
-     * =======================================================
-     * WebSocket OPEN
-     * =======================================================
+     * ==========================================================
+     * OPEN
+     * ==========================================================
      */
 
     ws.onopen = () => {
 
+      if (
+        destroyedRef.current ||
+        generation !==
+          socketGenerationRef.current ||
+        socketRef.current !== ws
+      ) {
+
+        return;
+
+      }
+
+
       console.log(
-        "[Terminal] WebSocket connected"
+        "[Terminal] connected:",
+        mode
       );
 
 
       /*
-       * WebSocket 建立后，
-       * 告诉服务器当前 xterm 尺寸。
+       * 等 DOM 稳定后 fit。
        */
 
       setTimeout(() => {
+
+        if (
+          destroyedRef.current ||
+          generation !==
+            socketGenerationRef.current ||
+          socketRef.current !== ws
+        ) {
+
+          return;
+
+        }
+
 
         fitTerminal();
 
-        sendResize();
 
-      }, 0);
+        /*
+         * 只有普通 Terminal
+         * 发送 resize。
+         */
 
+        if (
+          mode === "normal"
+        ) {
 
-      /*
-       * 自动 focus
-       */
+          sendNormalResize();
 
-      setTimeout(() => {
+        }
+
 
         try {
 
@@ -400,62 +599,61 @@ export const WnTerminal = () => {
 
         } catch (e) {}
 
-      }, 50);
+      }, 30);
 
     };
 
 
     /*
-     * =======================================================
-     * Server -> xterm
-     * =======================================================
+     * ==========================================================
+     * SERVER -> XTERM
+     * ==========================================================
      */
 
     ws.onmessage = async (
       event
     ) => {
 
-      /*
-       * -----------------------------------------------
-       * Text
-       * -----------------------------------------------
-       */
-
       if (
-        typeof event.data === "string"
+        destroyedRef.current ||
+        generation !==
+          socketGenerationRef.current ||
+        socketRef.current !== ws
       ) {
-
-        try {
-
-          term.write(
-            event.data
-          );
-
-        } catch (error) {
-
-          console.error(
-            "[Terminal] xterm write error:",
-            error
-          );
-
-        }
 
         return;
 
       }
 
 
-      /*
-       * -----------------------------------------------
-       * ArrayBuffer
-       * -----------------------------------------------
-       */
+      try {
 
-      if (
-        event.data instanceof ArrayBuffer
-      ) {
+        /*
+         * Text
+         */
 
-        try {
+        if (
+          typeof event.data ===
+          "string"
+        ) {
+
+          term.write(
+            event.data
+          );
+
+          return;
+
+        }
+
+
+        /*
+         * ArrayBuffer
+         */
+
+        if (
+          event.data instanceof
+          ArrayBuffer
+        ) {
 
           const decoder =
             new TextDecoder();
@@ -466,31 +664,19 @@ export const WnTerminal = () => {
             )
           );
 
-        } catch (error) {
-
-          console.error(
-            "[Terminal] ArrayBuffer decode error:",
-            error
-          );
+          return;
 
         }
 
-        return;
 
-      }
+        /*
+         * Blob
+         */
 
-
-      /*
-       * -----------------------------------------------
-       * Blob
-       * -----------------------------------------------
-       */
-
-      if (
-        event.data instanceof Blob
-      ) {
-
-        try {
+        if (
+          event.data instanceof
+          Blob
+        ) {
 
           const buffer =
             await event.data.arrayBuffer();
@@ -504,14 +690,14 @@ export const WnTerminal = () => {
             )
           );
 
-        } catch (error) {
-
-          console.error(
-            "[Terminal] Blob decode error:",
-            error
-          );
-
         }
+
+      } catch (e) {
+
+        console.error(
+          "[Terminal] write failed:",
+          e
+        );
 
       }
 
@@ -519,14 +705,24 @@ export const WnTerminal = () => {
 
 
     /*
-     * =======================================================
-     * WebSocket ERROR
-     * =======================================================
+     * ==========================================================
+     * ERROR
+     * ==========================================================
      */
 
     ws.onerror = (
       error
     ) => {
+
+      if (
+        generation !==
+        socketGenerationRef.current
+      ) {
+
+        return;
+
+      }
+
 
       console.error(
         "[Terminal] WebSocket error:",
@@ -537,25 +733,32 @@ export const WnTerminal = () => {
 
 
     /*
-     * =======================================================
-     * WebSocket CLOSE
-     * =======================================================
+     * ==========================================================
+     * CLOSE
+     * ==========================================================
      */
 
     ws.onclose = (
       event
     ) => {
 
+      if (
+        generation !==
+        socketGenerationRef.current
+      ) {
+
+        return;
+
+      }
+
+
       console.log(
-        "[Terminal] WebSocket closed:",
+        "[Terminal] closed:",
+        mode,
         event.code,
-        event.reason
+        event.reason || ""
       );
 
-
-      /*
-       * 只有当前 socket 才能清空引用。
-       */
 
       if (
         socketRef.current === ws
@@ -564,34 +767,28 @@ export const WnTerminal = () => {
         socketRef.current =
           null;
 
+        socketModeRef.current =
+          null;
+
       }
 
 
       /*
-       * 用户主动关闭窗口，
-       * 不做任何处理。
+       * Docker Terminal 结束：
+       *
+       * 清空 xterm。
+       *
+       * 下一次打开 Docker Terminal
+       * 时不会留下旧容器内容。
        */
 
       if (
-        intentionalCloseRef.current
+        mode === "docker"
       ) {
 
-        return;
+        clearTerminal();
 
       }
-
-
-      /*
-       * bash 执行 exit：
-       *
-       * PTY 结束
-       * ->
-       * WebSocket 关闭
-       *
-       * 这是正常行为。
-       *
-       * 不自动显示 Connection closed。
-       */
 
     };
 
@@ -599,63 +796,40 @@ export const WnTerminal = () => {
 
 
   /*
-   * =========================================================
-   * Initialize xterm
-   * =========================================================
+   * ============================================================
+   * 初始化 xterm
+   * ============================================================
    */
 
   useEffect(() => {
+
+    destroyedRef.current =
+      false;
+
 
     const container =
       terminalRef.current;
 
 
-    if (
-      !container
-    ) {
-
+    if (!container) {
       return;
-
     }
 
 
     /*
-     * =======================================================
-     * FitAddon
-     * =======================================================
-     */
-
-    const fitAddon =
-      new FitAddon();
-
-
-    fitAddonRef.current =
-      fitAddon;
-
-
-    /*
-     * =======================================================
-     * Create xterm
-     * =======================================================
+     * ==========================================================
+     * xterm
+     * ==========================================================
      */
 
     const term =
       new Terminal({
-
-        /*
-         * Cursor
-         */
 
         cursorBlink:
           true,
 
         cursorStyle:
           "block",
-
-
-        /*
-         * Font
-         */
 
         fontFamily:
           '"Cascadia Mono", "Cascadia Code", Consolas, monospace',
@@ -666,44 +840,17 @@ export const WnTerminal = () => {
         lineHeight:
           1.1,
 
-
-        /*
-         * Scrollback
-         */
-
         scrollback:
           5000,
-
-
-        /*
-         * Linux PTY
-         *
-         * 不强制转换换行。
-         */
 
         convertEol:
           false,
 
-
-        /*
-         * Mouse
-         */
-
         rightClickSelectsWord:
           true,
 
-
-        /*
-         * Transparency
-         */
-
         allowTransparency:
           false,
-
-
-        /*
-         * Theme
-         */
 
         theme: {
 
@@ -721,7 +868,6 @@ export const WnTerminal = () => {
 
           selectionBackground:
             "rgba(255,255,255,0.25)",
-
 
           black:
             "#0c0c0c",
@@ -781,8 +927,18 @@ export const WnTerminal = () => {
 
 
     /*
-     * 加载 FitAddon
+     * ==========================================================
+     * FitAddon
+     * ==========================================================
      */
+
+    const fitAddon =
+      new FitAddon();
+
+
+    fitAddonRef.current =
+      fitAddon;
+
 
     term.loadAddon(
       fitAddon
@@ -790,9 +946,9 @@ export const WnTerminal = () => {
 
 
     /*
-     * =======================================================
+     * ==========================================================
      * Open
-     * =======================================================
+     * ==========================================================
      */
 
     term.open(
@@ -801,24 +957,18 @@ export const WnTerminal = () => {
 
 
     /*
-     * =======================================================
-     * Keyboard input
+     * ==========================================================
+     * Keyboard
      *
-     * 所有按键由 xterm 处理：
+     * Docker：
      *
-     * Enter
-     * Backspace
-     * Ctrl+C
-     * Ctrl+D
-     * Ctrl+Z
-     * ESC
-     * F1-F12
-     * Tab
-     * Arrow
-     * 等等
+     *     原始 data
      *
-     * 然后发送给服务器。
-     * =======================================================
+     * 普通：
+     *
+     *     {"type":"input","data":"..."}
+     *
+     * ==========================================================
      */
 
     const dataDisposable =
@@ -828,10 +978,14 @@ export const WnTerminal = () => {
           const ws =
             socketRef.current;
 
+          const mode =
+            socketModeRef.current;
+
 
           if (
             !ws ||
-            ws.readyState !== WebSocket.OPEN
+            ws.readyState !==
+              WebSocket.OPEN
           ) {
 
             return;
@@ -841,18 +995,51 @@ export const WnTerminal = () => {
 
           try {
 
-            ws.send(
-              JSON.stringify({
-                type: "input",
-                data: data,
-              })
-            );
+            /*
+             * =================================================
+             * Docker
+             * =================================================
+             *
+             * 绝对不要 JSON.stringify。
+             */
 
-          } catch (error) {
+            if (
+              mode === "docker"
+            ) {
+
+              ws.send(
+                data
+              );
+
+              return;
+
+            }
+
+
+            /*
+             * =================================================
+             * 普通 Terminal
+             * =================================================
+             */
+
+            if (
+              mode === "normal"
+            ) {
+
+              ws.send(
+                JSON.stringify({
+                  type: "input",
+                  data: data,
+                })
+              );
+
+            }
+
+          } catch (e) {
 
             console.error(
               "[Terminal] input send failed:",
-              error
+              e
             );
 
           }
@@ -862,18 +1049,16 @@ export const WnTerminal = () => {
 
 
     /*
-     * =======================================================
-     * Terminal title
-     * =======================================================
+     * ==========================================================
+     * Title
+     * ==========================================================
      */
 
     const titleDisposable =
       term.onTitleChange(
         (title) => {
 
-          if (
-            title
-          ) {
+          if (title) {
 
             setWntitle(
               title
@@ -886,14 +1071,21 @@ export const WnTerminal = () => {
 
 
     /*
-     * =======================================================
+     * ==========================================================
      * ResizeObserver
-     * =======================================================
+     * ==========================================================
      */
 
     const resizeObserver =
       new ResizeObserver(
         () => {
+
+          /*
+           * 不修改窗口尺寸。
+           *
+           * 这里只让 xterm 适应
+           * Win11React 已经决定好的区域。
+           */
 
           resizeTerminal();
 
@@ -906,23 +1098,26 @@ export const WnTerminal = () => {
     );
 
 
+    resizeObserverRef.current =
+      resizeObserver;
+
+
     /*
-     * =======================================================
-     * Connect WebSocket
-     * =======================================================
+     * ==========================================================
+     * 初始连接
+     * ==========================================================
      */
 
     connectWebSocket(
-      term
+      term,
+      dockerContainer
     );
 
 
     /*
-     * =======================================================
-     * Initial fit
-     *
-     * Win11React DOM 通常需要两帧才能稳定。
-     * =======================================================
+     * ==========================================================
+     * 初始 Fit
+     * ==========================================================
      */
 
     requestAnimationFrame(() => {
@@ -937,9 +1132,9 @@ export const WnTerminal = () => {
 
 
     /*
-     * =======================================================
+     * ==========================================================
      * Focus
-     * =======================================================
+     * ==========================================================
      */
 
     const focusTimer =
@@ -955,21 +1150,16 @@ export const WnTerminal = () => {
 
 
     /*
-     * =======================================================
+     * ==========================================================
      * Cleanup
-     * =======================================================
+     * ==========================================================
      */
 
     return () => {
 
-      console.log(
-        "[Terminal] Destroy"
-      );
+      destroyedRef.current =
+        true;
 
-
-      /*
-       * 清理 timer
-       */
 
       clearTimeout(
         focusTimer
@@ -1004,55 +1194,50 @@ export const WnTerminal = () => {
       }
 
 
+      try {
+
+        resizeObserver.disconnect();
+
+      } catch (e) {}
+
+
+      resizeObserverRef.current =
+        null;
+
+
+      try {
+
+        dataDisposable.dispose();
+
+      } catch (e) {}
+
+
+      try {
+
+        titleDisposable.dispose();
+
+      } catch (e) {}
+
+
       /*
-       * ResizeObserver
+       * 让旧 WebSocket 永远失效。
        */
 
-      resizeObserver.disconnect();
+      socketGenerationRef.current += 1;
+
+
+      closeWebSocket();
 
 
       /*
-       * xterm events
-       */
-
-      dataDisposable.dispose();
-
-      titleDisposable.dispose();
-
-
-      /*
-       * 标记为主动销毁。
-       */
-
-      intentionalCloseRef.current =
-        true;
-
-
-      /*
-       * WebSocket
-       */
-
-      if (
-        socketRef.current
-      ) {
-
-        try {
-
-          socketRef.current.close();
-
-        } catch (e) {}
-
-        socketRef.current =
-          null;
-
-      }
-
-
-      /*
-       * xterm
+       * 清空并销毁 xterm。
        */
 
       try {
+
+        term.clear();
+
+        term.reset();
 
         term.dispose();
 
@@ -1071,32 +1256,319 @@ export const WnTerminal = () => {
 
 
   /*
-   * =========================================================
-   * Win11React window state changed
+   * ============================================================
+   * Terminal 模式 / 窗口状态变化
+   * ============================================================
    *
-   * 最大化
-   * 恢复
-   * 自定义尺寸
-   * 隐藏
-   * 等
-   * =========================================================
+   * 这是这版最重要的部分。
+   *
+   * 因为 Redux 的 hide=true 并不会卸载组件，
+   * 所以必须主动管理 WebSocket 生命周期。
+   * ============================================================
+   */
+
+  const previousModeRef =
+    useRef(null);
+
+  const previousContainerRef =
+    useRef(null);
+
+  const previousHideRef =
+    useRef(null);
+
+
+  useEffect(() => {
+
+    if (
+      destroyedRef.current
+    ) {
+
+      return;
+
+    }
+
+
+    const modeChanged =
+      previousModeRef.current !==
+      currentMode;
+
+
+    const containerChanged =
+      previousContainerRef.current !==
+      dockerContainer;
+
+
+    const hideChanged =
+      previousHideRef.current !==
+      wnapp.hide;
+
+
+    /*
+     * 第一次 render：
+     *
+     * 不重复连接。
+     */
+
+    if (
+      previousModeRef.current ===
+        null
+    ) {
+
+      previousModeRef.current =
+        currentMode;
+
+      previousContainerRef.current =
+        dockerContainer;
+
+      previousHideRef.current =
+        wnapp.hide;
+
+      return;
+
+    }
+
+
+    /*
+     * ==========================================================
+     * 窗口关闭 / 隐藏
+     * ==========================================================
+     */
+
+    if (
+      wnapp.hide &&
+      hideChanged
+    ) {
+
+      console.log(
+        "[Terminal] window hidden -> close websocket"
+      );
+
+
+      socketGenerationRef.current += 1;
+
+      closeWebSocket();
+
+
+      /*
+       * 无论普通还是 Docker，
+       * 关闭窗口都清空屏幕。
+       */
+
+      clearTerminal();
+
+
+      previousModeRef.current =
+        currentMode;
+
+      previousContainerRef.current =
+        dockerContainer;
+
+      previousHideRef.current =
+        wnapp.hide;
+
+      return;
+
+    }
+
+
+    /*
+     * ==========================================================
+     * 窗口重新打开
+     * ==========================================================
+     */
+
+    if (
+      !wnapp.hide &&
+      hideChanged
+    ) {
+
+      const term =
+        terminalInstance.current;
+
+
+      if (term) {
+
+        /*
+         * 清空旧内容。
+         */
+
+        clearTerminal();
+
+
+        /*
+         * 建立新 WebSocket。
+         */
+
+        connectWebSocket(
+          term,
+          dockerContainer
+        );
+
+
+        setTimeout(() => {
+
+          resizeTerminal();
+
+          try {
+
+            term.focus();
+
+          } catch (e) {}
+
+        }, 80);
+
+      }
+
+    }
+
+
+    /*
+     * ==========================================================
+     * Docker <-> 普通 Terminal
+     * ==========================================================
+     *
+     * 例如：
+     *
+     * Docker A
+     *     ↓
+     * close
+     *     ↓
+     * 普通 Terminal
+     *
+     * 或：
+     *
+     * 普通 Terminal
+     *     ↓
+     * Docker A
+     *
+     * 都必须重新建立 WS。
+     * ==========================================================
+     */
+
+    if (
+      !wnapp.hide &&
+      (modeChanged ||
+        containerChanged)
+    ) {
+
+      const term =
+        terminalInstance.current;
+
+
+      if (term) {
+
+        console.log(
+          "[Terminal] mode changed:",
+          currentMode,
+          dockerContainer || ""
+        );
+
+
+        socketGenerationRef.current += 1;
+
+        closeWebSocket();
+
+        clearTerminal();
+
+
+        connectWebSocket(
+          term,
+          dockerContainer
+        );
+
+
+        setTimeout(() => {
+
+          resizeTerminal();
+
+          try {
+
+            term.focus();
+
+          } catch (e) {}
+
+        }, 80);
+
+      }
+
+    }
+
+
+    /*
+     * 保存状态。
+     */
+
+    previousModeRef.current =
+      currentMode;
+
+    previousContainerRef.current =
+      dockerContainer;
+
+    previousHideRef.current =
+      wnapp.hide;
+
+  }, [
+    wnapp.hide,
+    dockerContainer,
+    currentMode,
+  ]);
+
+
+  /*
+   * ============================================================
+   * Win11React Window Resize / Maximize / Restore
+   * ============================================================
+   *
+   * 注意：
+   *
+   * 这里只 fit xterm。
+   *
+   * 不修改：
+   *
+   *     wnapp.dim
+   *     wnapp.size
+   *     width
+   *     height
+   *     top
+   *     left
+   *
+   * 窗口尺寸完全交给 Win11React。
+   * ============================================================
    */
 
   useEffect(() => {
 
-    const timer =
+    if (
+      wnapp.hide
+    ) {
+
+      return;
+
+    }
+
+
+    const timers = [];
+
+
+    timers.push(
       setTimeout(() => {
 
         resizeTerminal();
 
+      }, 30)
+    );
+
+
+    timers.push(
+      setTimeout(() => {
+
+        resizeTerminal();
 
         const term =
           terminalInstance.current;
 
 
-        if (
-          term
-        ) {
+        if (term) {
 
           try {
 
@@ -1106,13 +1578,29 @@ export const WnTerminal = () => {
 
         }
 
-      }, 100);
+      }, 150)
+    );
+
+
+    timers.push(
+      setTimeout(() => {
+
+        resizeTerminal();
+
+      }, 350)
+    );
 
 
     return () => {
 
-      clearTimeout(
-        timer
+      timers.forEach(
+        (timer) => {
+
+          clearTimeout(
+            timer
+          );
+
+        }
       );
 
     };
@@ -1126,32 +1614,9 @@ export const WnTerminal = () => {
 
 
   /*
-   * =========================================================
-   * Close
-   * =========================================================
-   */
-
-  const closeTerminal = () => {
-
-    intentionalCloseRef.current =
-      true;
-
-
-    dispatch({
-      type:
-        wnapp.action,
-
-      payload:
-        "close",
-    });
-
-  };
-
-
-  /*
-   * =========================================================
+   * ============================================================
    * Render
-   * =========================================================
+   * ============================================================
    */
 
   return (
@@ -1178,33 +1643,12 @@ export const WnTerminal = () => {
       style={{
         ...(wnapp.size === "cstm"
           ? wnapp.dim
-          : null),
+          : {}),
 
         zIndex:
           wnapp.z,
-
-        minWidth:
-          0,
-
-        minHeight:
-          0,
-
-        display:
-          "flex",
-
-        flexDirection:
-          "column",
-
-        overflow:
-          "hidden",
       }}
     >
-
-      {/*
-       * =====================================================
-       * Win11React title bar
-       * =====================================================
-       */}
 
       <ToolBar
         app={
@@ -1229,20 +1673,53 @@ export const WnTerminal = () => {
       />
 
 
-      {/*
-       * =====================================================
-       * Terminal body
-       * =====================================================
-       */}
-
       <div
         className="terminal-body"
+        style={{
+          flex:
+            "1 1 0",
 
-        data-dock="true"
+          minHeight:
+            0,
+
+          minWidth:
+            0,
+
+          width:
+            "100%",
+
+          overflow:
+            "hidden",
+
+          display:
+            "flex",
+        }}
       >
 
         <div
           className="terminal-content"
+          style={{
+            flex:
+              "1 1 0",
+
+            minHeight:
+            0,
+
+            minWidth:
+              0,
+
+            width:
+              "100%",
+
+            height:
+              "100%",
+
+            overflow:
+              "hidden",
+
+            display:
+              "flex",
+          }}
         >
 
           <div
@@ -1251,6 +1728,26 @@ export const WnTerminal = () => {
             }
 
             className="terminal-container"
+
+            style={{
+              flex:
+                "1 1 0",
+
+              minHeight:
+                0,
+
+              minWidth:
+                0,
+
+              width:
+                "100%",
+
+              height:
+                "100%",
+
+              overflow:
+                "hidden",
+            }}
           />
 
         </div>
@@ -1262,3 +1759,6 @@ export const WnTerminal = () => {
   );
 
 };
+
+
+export default WnTerminal;

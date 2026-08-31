@@ -1200,46 +1200,43 @@ const DockerCompose = () => {
 
                                 &&
 
-                                <div
-                                    className="composeLogs"
-                                >
+                                <div className="docker-compose-log-overlay">
+
+				    <div className="docker-compose-log-window">
 
 
-                                    <div
-                                        className="composeLogsHeader"
-                                    >
+				        <div className="docker-compose-log-header">
 
-                                        <strong>
-                                            Compose 日志
-                                        </strong>
+					            <strong>
+					                Compose 日志：{selected.name}
+					            </strong>
 
 
-                                        <button
-                                            onClick={() =>
-                                                setShowLogs(
-                                                    false
-                                                )
-                                            }
-                                        >
+					            <button
+					                onClick={() =>
+					                    setShowLogs(false)
+					                }
+					            >
+					                ×
+					            </button>
 
-                                            ×
-
-                                        </button>
-
-                                    </div>
+					        </div>
 
 
-                                    <pre>
 
-                                        {
-                                            logs ||
-                                            "暂无日志"
-                                        }
+					        <pre
+					            className="docker-compose-log-content"
+					        >
+					            {
+					                logs ||
+					                "暂无日志"
+					            }
+					        </pre>
 
-                                    </pre>
 
+					    </div>
 
-                                </div>
+					</div>
 
                             }
 

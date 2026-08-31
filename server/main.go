@@ -73,6 +73,19 @@ func main() {
 			panelApi.SystemStatus,
 		)
 
+		protected.GET(
+			"/services",
+			panelApi.Services,
+		)
+		protected.POST(
+			"/service/:action/:name",
+			panelApi.ServiceAction,
+		)
+		protected.GET(
+			"/api/processes",
+			panelApi.Processes,
+		)
+
 		/*
 		 * ========================================================
 		 * 用户

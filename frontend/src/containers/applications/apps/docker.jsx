@@ -4,7 +4,7 @@ import React, {
 } from "react";
 
 import DockerCreate from "./dockerCreate";
-
+import DockerCompose from "./dockerCompose";
 import {
     useSelector,
     useDispatch,

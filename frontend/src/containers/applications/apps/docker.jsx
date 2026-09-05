@@ -5,6 +5,7 @@ import React, {
 
 import DockerCreate from "./dockerCreate";
 import DockerCompose from "./dockerCompose";
+import DockerInstall from "./dockerinstall";
 import {
     useSelector,
     useDispatch,
@@ -45,7 +46,12 @@ const Docker = () => {
 
     const [
         create,
-        setCreate
+        setCreate,
+    ] = useState(false);
+
+    const [
+        dockerInstalled,
+	setDockerInstalled
     ] = useState(false);
 
 
@@ -1651,7 +1657,38 @@ const Docker = () => {
     Pull Status Polling
     ==========================================================
     */
+    useEffect(()=>{
 
+    fetch(
+        "/api/docker/info",
+        {
+            credentials:"include",
+        }
+    )
+    .then(
+        res=>{
+
+            if(!res.ok){
+
+                setDockerInstalled(false);
+
+                return;
+
+            }
+
+
+            setDockerInstalled(true);
+
+        }
+    )
+    .catch(()=>{
+
+        setDockerInstalled(false);
+
+    });
+
+
+},[]);
     useEffect(() => {
 
         if (
@@ -2603,7 +2640,18 @@ const Docker = () => {
                         className=
                             "win11Scroll"
                     >
+{
 
+!dockerInstalled
+
+?
+
+<DockerInstall />
+
+:
+
+(
+<>
                         <div
                             className=
                                 "docker-title"
@@ -3978,7 +4026,9 @@ const Docker = () => {
 
                             </div>
                         }
-
+		    </>
+		    )
+		    }
                     </main>
 
                 </div>

@@ -78,12 +78,16 @@ func main() {
 			panelApi.Services,
 		)
 		protected.POST(
-			"/service/:action/:name",
+			"/service/:name/:action",
 			panelApi.ServiceAction,
 		)
 		protected.GET(
-			"/api/processes",
+			"/processes",
 			panelApi.Processes,
+		)
+		protected.POST(
+			"/process/:pid",
+			panelApi.KillProcess,
 		)
 
 		/*
@@ -168,6 +172,10 @@ func main() {
 		protected.GET(
 			"/docker/info",
 			panelApi.DockerInfo,
+		)
+		protected.GET(
+			"/docker/check",
+			panelApi.DockerCheck,
 		)
 		protected.GET(
 			"/docker/containers",

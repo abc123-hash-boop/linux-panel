@@ -151,6 +151,11 @@ func main() {
 		)
 
 		protected.POST(
+			"/file/upload",
+			panelApi.FileUpload,
+		)
+
+		protected.POST(
 			"/file/mkdir",
 			panelApi.FileMkdir,
 		)

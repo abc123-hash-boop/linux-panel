@@ -115,9 +115,8 @@ const CopilotView = () => {
         merged.push({ ...d, _preset: false });
       });
       setProviders(merged);
-      // 如果当前 activeProvider 不在列表中，选第一个；否则保持
-      const currentIds = merged.map(p => p.id);
-      if (!currentIds.includes(activeProvider?.id)) setActiveProvider(merged[0]);
+      // 新 provider 总是追加到末尾，刷新后选最后一个
+      setActiveProvider(merged[merged.length - 1]);
     } catch {}
   };
 

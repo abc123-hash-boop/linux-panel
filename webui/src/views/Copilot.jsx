@@ -101,7 +101,7 @@ const CopilotView = () => {
     setDeleteConfirm(null);
   };
 
-  const loadProviders = async () => {
+  const loadProviders = async (afterSave = false) => {
     try {
       const res = await apiClient.get('/copilot/providers');
       const db = Array.isArray(res.data) ? res.data : [];
@@ -115,8 +115,8 @@ const CopilotView = () => {
         merged.push({ ...d, _preset: false });
       });
       setProviders(merged);
-      // 新 provider 总是追加到末尾，刷新后选最后一个
-      setActiveProvider(merged[merged.length - 1]);
+      // 保存后选最后一个（新添加的），初始加载选第一个
+      setActiveProvider(merged[afterSave ? merged.length - 1 : 0]);
     } catch {}
   };
 
@@ -131,7 +131,7 @@ const CopilotView = () => {
         await apiClient.post('/copilot/providers', payload);
       }
       setEditProvider(null);
-      await loadProviders();
+      await loadProviders(true);
     } catch (e) { console.error(e); } finally { setSaving(false); }
   };
 

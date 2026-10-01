@@ -116,6 +116,14 @@ const CopilotView = () => {
     updateSession(sid, { name: trimmed });
   };
 
+  const fetchModels = async (prov) => {
+    if (!prov?.api_base) return;
+    try {
+      const res = await apiClient.post('/copilot/fetch-models', { api_base: prov.api_base, api_key: prov.api_key || '' });
+      if (Array.isArray(res.data)) setModels(res.data);
+    } catch {}
+  };
+
   const loadProviders = async () => {
     try {
       const res = await apiClient.get('/copilot/providers');

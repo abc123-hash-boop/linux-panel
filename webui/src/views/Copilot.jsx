@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import apiClient from '../api/client';
-import { Send, Bot, User, Sparkles, Plus, Trash2, Edit3, Save, X, Loader2, RefreshCw, Settings, MessageSquare } from 'lucide-react';
+import { Send, Bot, User, Sparkles, Plus, Trash2, Edit3, Save, Loader2, RefreshCw, Settings, MessageSquare } from 'lucide-react';
 
 const PRESET_PROVIDERS = [
   { name: 'OpenAI', icon: '🟢', api_base: 'https://api.openai.com/v1' },
@@ -30,6 +30,7 @@ const CopilotView = () => {
   const [editName, setEditName] = useState('');
   const [editIcon, setEditIcon] = useState('');
   const [editAPIBase, setEditAPIBase] = useState('');
+  const [editAPIKey, setEditAPIKey] = useState('');
   const [modelInput, setModelInput] = useState('');
   const [savedModels, setSavedModels] = useState([]);
   const [saving, setSaving] = useState(false);
@@ -38,40 +39,31 @@ const CopilotView = () => {
   const messagesEndRef = useRef(null);
   const inputRef = useRef(null);
 
-  // 初始化：加载会话和提供商
-  useEffect(() => {
-    loadSessions();
-    loadProviders();
-  }, []);
-
-  // 滚动到底部
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
-
-  // 切换会话时加载历史
-  useEffect(() => {
-    if (activeSessionId) loadSessionMessages();
-  }, [activeSessionId]);
-
-  // 切换提供商时获取模型列表
+  useEffect(() => { loadSessions(); loadProviders(); }, []);
+  useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages]);
+  useEffect(() => { if (activeSessionId) loadSessionMessages(); }, [activeSessionId]);
   useEffect(() => {
     if (activeProvider?.api_base) {
       setModels([]);
       setFetchingModels(true);
-      apiClient.post('/copilot/fetch-models', {
-        api_base: activeProvider.api_base,
-        api_key: activeProvider.api_key || '',
-      }).then(res => {
-        if (Array.isArray(res.data)) setModels(res.data);
-      }).catch(() => {}).finally(() => setFetchingModels(false));
+      apiClient.post('/copilot/fetch-models', { api_base: activeProvider.api_base, api_key: activeProvider.api_key || '' })
+        .then(res => { if (Array.isArray(res.data)) setModels(res.data); })
+        .catch(() => {}).finally(() => setFetchingModels(false));
     }
   }, [activeProvider?.id]);
+
+  const fetchModels = async (prov) => {
+    if (!prov?.api_base) return;
+    try {
+      const res = await apiClient.post('/copilot/fetch-models', { api_base: prov.api_base, api_key: prov.api_key || '' });
+      if (Array.isArray(res.data)) setModels(res.data);
+    } catch {}
+  };
 
   const loadSessions = async () => {
     try {
       const res = await apiClient.get('/copilot/sessions');
-      const list = res.data;
+      const list = Array.isArray(res.data) ? res.data : [];
       setSessions(list);
       if (list.length > 0 && !activeSessionId) setActiveSessionId(list[0].id);
     } catch {}
@@ -109,35 +101,21 @@ const CopilotView = () => {
     setDeleteConfirm(null);
   };
 
-  const renameSession = (sid, newName) => {
-    const trimmed = newName.trim();
-    if (!trimmed) return;
-    setSessions(prev => prev.map(s => s.id === sid ? { ...s, name: trimmed } : s));
-    updateSession(sid, { name: trimmed });
-  };
-
-  const fetchModels = async (prov) => {
-    if (!prov?.api_base) return;
-    try {
-      const res = await apiClient.post('/copilot/fetch-models', { api_base: prov.api_base, api_key: prov.api_key || '' });
-      if (Array.isArray(res.data)) setModels(res.data);
-    } catch {}
-  };
-
   const loadProviders = async () => {
     try {
       const res = await apiClient.get('/copilot/providers');
-      const db = res.data;
-      const list = PRESET_PROVIDERS.map(p => {
+      const db = Array.isArray(res.data) ? res.data : [];
+      // 1. 预设 provider：从 DB 拿数据填充
+      const merged = PRESET_PROVIDERS.map(p => {
         const found = db.find(d => d.name === p.name);
-        return found ? { ...found, _custom: false } : { id: 0, name: p.name, icon: p.icon, api_base: p.api_base, api_key: '', models: [], _custom: false };
+        return found ? { ...found, _preset: true } : { id: 0, name: p.name, icon: p.icon, api_base: p.api_base, api_key: '', models: [], _preset: true };
       });
-      // 添加自定义 provider
+      // 2. 添加 DB 中不在预设里的自定义 provider
       db.filter(d => !PRESET_PROVIDERS.find(p => p.name === d.name)).forEach(d => {
-        list.push({ ...d, _custom: true });
+        merged.push({ ...d, _preset: false });
       });
-      setProviders(list);
-      if (list.length > 0 && !activeProvider) setActiveProvider(list[0]);
+      setProviders(merged);
+      if (merged.length > 0 && !activeProvider) setActiveProvider(merged[0]);
     } catch {}
   };
 
@@ -146,7 +124,7 @@ const CopilotView = () => {
     setSaving(true);
     try {
       const payload = { name: editName.trim(), icon: editIcon.trim(), api_base: editAPIBase.trim(), models: savedModels };
-      if (editProvider?._custom || editProvider?.id > 0) {
+      if (editProvider) {
         await apiClient.put(`/copilot/provider/${editProvider.id}`, payload);
       } else {
         await apiClient.post('/copilot/providers', payload);
@@ -157,7 +135,6 @@ const CopilotView = () => {
   };
 
   const deleteProvider = async (prov) => {
-    if (!prov._custom && prov.id === 0) { setDeleteConfirm(null); return; }
     try {
       await apiClient.delete(`/copilot/provider/${prov.id}`);
       setProviders(prev => prev.filter(p => p.id !== prov.id));
@@ -167,20 +144,12 @@ const CopilotView = () => {
   };
 
   const openEditProvider = (prov) => {
-    if (prov._custom || prov.id > 0) {
-      setEditProvider(prov);
-      setEditName(prov.name);
-      setEditIcon(prov.icon || '');
-      setEditAPIBase(prov.api_base || '');
-      setSavedModels((prov.models || []).map(m => m.name || m));
-    } else {
-      // 预设 provider，创建临时副本
-      setEditProvider({ ...prov, _custom: true });
-      setEditName(prov.name);
-      setEditIcon(prov.icon || '');
-      setEditAPIBase(prov.api_base || '');
-      setSavedModels([]);
-    }
+    setEditProvider(prov);
+    setEditName(prov.name);
+    setEditIcon(prov.icon || '');
+    setEditAPIBase(prov.api_base || '');
+    setEditAPIKey(prov.api_key || '');
+    setSavedModels((prov.models || []).map(m => m.name || m));
   };
 
   const selectModel = (m) => {
@@ -244,17 +213,12 @@ const CopilotView = () => {
         </div>
         <div className="flex-1 overflow-y-auto">
           {sessions.map(s => (
-            <div
-              key={s.id}
-              onClick={() => setActiveSessionId(s.id)}
-              className={`group flex items-center gap-2 px-3 py-2.5 cursor-pointer hover:bg-gray-50 transition-colors ${activeSessionId === s.id ? 'bg-violet-50 border-r-2 border-violet-500' : ''}`}
-            >
+            <div key={s.id} onClick={() => setActiveSessionId(s.id)}
+              className={`group flex items-center gap-2 px-3 py-2.5 cursor-pointer hover:bg-gray-50 transition-colors ${activeSessionId === s.id ? 'bg-violet-50 border-r-2 border-violet-500' : ''}`}>
               <MessageSquare size={14} className="text-gray-400 shrink-0" />
               <span className="flex-1 text-sm text-gray-700 truncate">{s.name}</span>
-              <button
-                onClick={e => { e.stopPropagation(); setDeleteConfirm({ type: 'session', id: s.id, name: s.name }); }}
-                className="opacity-0 group-hover:opacity-100 p-1 text-gray-400 hover:text-red-500 rounded transition-all"
-              >
+              <button onClick={e => { e.stopPropagation(); setDeleteConfirm({ type: 'session', id: s.id, name: s.name }); }}
+                className="opacity-0 group-hover:opacity-100 p-1 text-gray-400 hover:text-red-500 rounded transition-all">
                 <Trash2 size={12} />
               </button>
             </div>
@@ -374,17 +338,18 @@ const CopilotView = () => {
               <div className="w-60 border-r border-gray-100 overflow-y-auto p-3 flex flex-col">
                 <div className="flex items-center justify-between mb-2">
                   <span className="text-xs font-semibold text-gray-500 uppercase">Providers</span>
-                  <button onClick={() => openEditProvider({ name: '', icon: '', api_base: '', _custom: true })}
+                  <button onClick={() => openEditProvider({ id: 0, name: '', icon: '', api_base: '', api_key: '', models: [], _preset: false })}
                     className="p-1.5 text-gray-400 hover:text-violet-600 hover:bg-violet-50 rounded-lg transition-colors" title="添加">
                     <Plus size={14} />
                   </button>
                 </div>
                 {providers.map(p => (
-                  <div key={p.id} onClick={() => { if (p.id > 0 || !p._custom) setActiveProvider(p); }}
+                  <div key={p.id || p.name} onClick={() => setActiveProvider(p)}
                     className={`flex items-center gap-2 px-3 py-2 rounded-lg mb-1 cursor-pointer transition-all ${activeProvider?.id === p.id ? 'bg-violet-100 text-violet-700' : 'hover:bg-gray-50 text-gray-700'}`}>
                     <span className="text-base">{p.icon || '⚙️'}</span>
                     <span className="flex-1 text-sm font-medium truncate">{p.name}</span>
-                    {!p._custom && p.id > 0 && (
+                    {p.models?.length > 0 && <span className="text-xs text-gray-400">{p.models.length}</span>}
+                    {!p._preset && (
                       <>
                         <button onClick={e => { e.stopPropagation(); openEditProvider(p); }} className="p-1 text-gray-400 hover:text-blue-500 rounded"><Edit3 size={11} /></button>
                         <button onClick={e => { e.stopPropagation(); setDeleteConfirm({ type: 'provider', data: p }); }} className="p-1 text-gray-400 hover:text-red-500 rounded"><Trash2 size={11} /></button>
@@ -405,7 +370,7 @@ const CopilotView = () => {
                         <p className="text-xs text-gray-400 font-mono truncate max-w-xs">{activeProvider.api_base || '未设置 Base URL'}</p>
                       </div>
                       {activeProvider.api_base && (
-                        <button onClick={() => { setModels([]); setFetchingModels(true); fetchModels(activeProvider); }}
+                        <button onClick={() => { setModels([]); setFetchingModels(true); apiClient.post('/copilot/fetch-models', { api_base: activeProvider.api_base, api_key: activeProvider.api_key || '' }).then(r => { if (Array.isArray(r.data)) setModels(r.data); }).catch(() => {}).finally(() => setFetchingModels(false)); }}
                           disabled={fetchingModels}
                           className="ml-auto p-2 text-gray-400 hover:text-violet-600 disabled:opacity-40 rounded-lg transition-colors" title="刷新模型列表">
                           <RefreshCw size={14} className={fetchingModels ? 'animate-spin' : ''} />
@@ -413,15 +378,13 @@ const CopilotView = () => {
                       )}
                     </div>
 
-                    {/* API Key（仅自定义/预设） */}
-                    {activeProvider.id === 0 && (
-                      <div>
-                        <label className="block text-xs font-medium text-gray-500 mb-1">API Key</label>
-                        <input type="password" value={activeProvider.api_key || ''}
-                          onChange={e => setActiveProvider({ ...activeProvider, api_key: e.target.value })}
-                          placeholder="sk-..." className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm font-mono outline-none focus:ring-2 focus:ring-violet-500" />
-                      </div>
-                    )}
+                    {/* API Key */}
+                    <div>
+                      <label className="block text-xs font-medium text-gray-500 mb-1">API Key</label>
+                      <input type="password" value={activeProvider.api_key || ''}
+                        onChange={e => setActiveProvider({ ...activeProvider, api_key: e.target.value })}
+                        placeholder="sk-..." className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm font-mono outline-none focus:ring-2 focus:ring-violet-500" />
+                    </div>
 
                     {/* 已获取模型 */}
                     {models.length > 0 && (
@@ -504,7 +467,7 @@ const CopilotView = () => {
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 backdrop-blur-sm" onClick={e => { if (e.target === e.currentTarget) setEditProvider(null); }}>
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4 overflow-hidden">
             <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
-              <h3 className="font-bold text-gray-800">{editProvider._custom && editProvider.name === '' ? '添加提供商' : editProvider.id > 0 ? '编辑提供商' : '编辑预设'}</h3>
+              <h3 className="font-bold text-gray-800">{editProvider.name === '' ? '添加提供商' : '编辑提供商'}</h3>
               <button onClick={() => setEditProvider(null)} className="text-gray-400 hover:text-gray-600 text-xl leading-none">×</button>
             </div>
             <div className="p-6 space-y-4">
@@ -524,7 +487,7 @@ const CopilotView = () => {
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">API Key</label>
-                <input type="password" value={editProvider.api_key || ''} onChange={e => setEditProvider(prev => prev ? { ...prev, api_key: e.target.value } : null)} placeholder="sk-..." className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm outline-none focus:ring-2 focus:ring-violet-500 font-mono" />
+                <input type="password" value={editAPIKey} onChange={e => setEditAPIKey(e.target.value)} placeholder="sk-..." className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm outline-none focus:ring-2 focus:ring-violet-500 font-mono" />
               </div>
             </div>
             <div className="px-6 py-4 border-t border-gray-100 flex justify-end gap-2">

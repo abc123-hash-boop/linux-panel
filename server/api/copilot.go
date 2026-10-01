@@ -14,134 +14,184 @@ import (
 
 // CopilotSettingsKey 存储在 settings 表中的 key
 const (
-	CopilotModelKey       = "copilot_model"
-	CopilotAPIKeyKey      = "copilot_api_key"
-	CopilotAPIBase        = "copilot_api_base"
-	CopilotHistoryKey     = "copilot_history"
-	CopilotProvidersKey   = "copilot_providers"
+	CopilotHistoryKey = "copilot_history"
 )
 
-// CopilotSettings 前端提交的配置结构
-type CopilotSettings struct {
-	Model  string `json:"model"`
-	APIKey string `json:"api_key"`
-	APIBase string `json:"api_base"`
-}
-
-// CopilotProvider 一个模型提供商
-type CopilotProvider struct {
-	Name   string `json:"name"`
-	Icon   string `json:"icon,omitempty"`
-	APIKey string `json:"api_key"`
-	APIBase string `json:"api_base"`
-}
-
 // ============================================================
-// 设置 CRUD
+// Session
 // ============================================================
 
-func copilotGetValue(key string) string {
-	var value string
-	database.DB.QueryRow("SELECT value FROM settings WHERE key = ?", key).Scan(&value)
-	return value
+type Session struct {
+	ID       int64  `json:"id"`
+	Name     string `json:"name"`
+	Model    string `json:"model"`
+	APIKey   string `json:"api_key"`
+	APIBase  string `json:"api_base"`
 }
 
-func copilotUpsert(key, value string) {
-	upsert := `INSERT INTO settings (key, value) VALUES (?, ?)
-	           ON CONFLICT(key) DO UPDATE SET value = excluded.value`
-	database.DB.Exec(upsert, key, value)
-}
-
-// CopilotGetSettings 获取当前配置
-func CopilotGetSettings(c *gin.Context) {
-	rows, err := database.DB.Query("SELECT key, value FROM settings WHERE key IN (?, ?, ?)",
-		CopilotModelKey, CopilotAPIKeyKey, CopilotAPIBase)
+func CopilotListSessions(c *gin.Context) {
+	rows, err := database.DB.Query("SELECT id, name, model, api_key, api_base FROM copilot_sessions ORDER BY id")
 	if err != nil {
 		c.JSON(500, gin.H{"error": "database error"})
 		return
 	}
 	defer rows.Close()
 
-	settings := gin.H{
-		"model":    "gpt-4o",
-		"api_key":  "",
-		"api_base": "https://api.openai.com/v1",
-	}
-
+	var sessions []Session
 	for rows.Next() {
-		var key, value string
-		if err := rows.Scan(&key, &value); err != nil {
-			continue
-		}
-		switch key {
-		case CopilotModelKey:
-			settings["model"] = value
-		case CopilotAPIKeyKey:
-			settings["api_key"] = value
-		case CopilotAPIBase:
-			settings["api_base"] = value
-		}
+		var s Session
+		rows.Scan(&s.ID, &s.Name, &s.Model, &s.APIKey, &s.APIBase)
+		sessions = append(sessions, s)
 	}
-	c.JSON(200, settings)
+	c.JSON(200, sessions)
 }
 
-// CopilotSaveSettings 保存配置
-func CopilotSaveSettings(c *gin.Context) {
-	var data CopilotSettings
+func CopilotCreateSession(c *gin.Context) {
+	var data struct {
+		Name string `json:"name" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&data); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "name required"})
+		return
+	}
+	name := strings.TrimSpace(data.Name)
+	if name == "" {
+		var cnt int
+	database.DB.QueryRow("SELECT COUNT(*) FROM copilot_sessions").Scan(&cnt)
+	name = fmt.Sprintf("对话 %d", cnt+1)
+	}
+	id, _ := database.DB.Exec("INSERT INTO copilot_sessions(name, model, api_key, api_base) VALUES(?,?,?,?)",
+		name, "gpt-4o", "", "https://api.openai.com/v1")
+	res, _ := id.LastInsertId()
+	c.JSON(200, gin.H{"id": res, "name": name})
+}
+
+func CopilotUpdateSession(c *gin.Context) {
+	id := c.Param("id")
+	var data Session
 	if err := c.ShouldBindJSON(&data); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "bad request"})
 		return
 	}
+	_, err := database.DB.Exec(
+		"UPDATE copilot_sessions SET name=?, model=?, api_key=?, api_base=? WHERE id=?",
+		data.Name, data.Model, data.APIKey, data.APIBase, id)
+	if err != nil {
+		c.JSON(500, gin.H{"error": "update failed"})
+		return
+	}
+	c.JSON(200, gin.H{"message": "updated"})
+}
 
-	if data.Model != "" {
-		copilotUpsert(CopilotModelKey, data.Model)
-	}
-	if data.APIKey != "" {
-		copilotUpsert(CopilotAPIKeyKey, data.APIKey)
-	}
-	if data.APIBase != "" {
-		copilotUpsert(CopilotAPIBase, data.APIBase)
-	}
-
-	c.JSON(200, gin.H{"message": "saved"})
+func CopilotDeleteSession(c *gin.Context) {
+	id := c.Param("id")
+	database.DB.Exec("DELETE FROM copilot_sessions WHERE id=?", id)
+	c.JSON(200, gin.H{"message": "deleted"})
 }
 
 // ============================================================
-// Provider CRUD
+// Provider + Models (合并)
 // ============================================================
 
-// CopilotGetProviders 获取所有已保存的提供商
-func CopilotGetProviders(c *gin.Context) {
-	value := copilotGetValue(CopilotProvidersKey)
-	if value == "" {
-		c.JSON(200, []CopilotProvider{})
+type Provider struct {
+	ID       int64  `json:"id"`
+	Name     string `json:"name"`
+	Icon     string `json:"icon"`
+	APIBase  string `json:"api_base"`
+	APIKey   string `json:"api_key"`
+	Models   []ModelItem `json:"models"`
+}
+
+type ModelItem struct {
+	ID   int64  `json:"id"`
+	Name string `json:"name"`
+}
+
+func CopilotListProviders(c *gin.Context) {
+	rows, err := database.DB.Query("SELECT id, name, icon, api_base FROM copilot_providers ORDER BY id")
+	if err != nil {
+		c.JSON(500, gin.H{"error": "db error"})
 		return
 	}
-	var providers []CopilotProvider
-	if err := json.Unmarshal([]byte(value), &providers); err != nil {
-		c.JSON(200, []CopilotProvider{})
-		return
+	defer rows.Close()
+
+	var providers []Provider
+	for rows.Next() {
+		var p Provider
+		rows.Scan(&p.ID, &p.Name, &p.Icon, &p.APIBase)
+		// 加载该 provider 的 models
+		mrows, _ := database.DB.Query("SELECT id, name FROM copilot_models WHERE provider_id=?", p.ID)
+		for mrows.Next() {
+			var mi ModelItem
+			mrows.Scan(&mi.ID, &mi.Name)
+			p.Models = append(p.Models, mi)
+		}
+		mrows.Close()
+		providers = append(providers, p)
 	}
 	c.JSON(200, providers)
 }
 
-// CopilotSaveProviders 保存所有提供商
-func CopilotSaveProviders(c *gin.Context) {
-	var providers []CopilotProvider
-	if err := c.ShouldBindJSON(&providers); err != nil {
+func CopilotCreateProvider(c *gin.Context) {
+	var data struct {
+		Name   string `json:"name" binding:"required"`
+		Icon   string `json:"icon"`
+		APIBase string `json:"api_base" binding:"required"`
+		Models []string `json:"models"`
+	}
+	if err := c.ShouldBindJSON(&data); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "bad request"})
 		return
 	}
-	data, _ := json.Marshal(providers)
-	copilotUpsert(CopilotProvidersKey, string(data))
-	c.JSON(200, gin.H{"message": "saved"})
+	res, err := database.DB.Exec("INSERT INTO copilot_providers(name, icon, api_base) VALUES(?,?,?)",
+		data.Name, data.Icon, data.APIBase)
+	if err != nil {
+		c.JSON(500, gin.H{"error": "insert failed"})
+		return
+	}
+	provID, _ := res.LastInsertId()
+	for _, mname := range data.Models {
+		if mname != "" {
+			database.DB.Exec("INSERT INTO copilot_models(provider_id, name) VALUES(?,?)", provID, mname)
+		}
+	}
+	c.JSON(200, gin.H{"id": provID, "name": data.Name})
+}
+
+func CopilotUpdateProvider(c *gin.Context) {
+	id := c.Param("id")
+	var data struct {
+		Name    string   `json:"name"`
+		Icon    string   `json:"icon"`
+		APIBase string   `json:"api_base"`
+		Models  []string `json:"models"`
+	}
+	if err := c.ShouldBindJSON(&data); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "bad request"})
+		return
+	}
+	database.DB.Exec("UPDATE copilot_providers SET name=?, icon=?, api_base=? WHERE id=?",
+		data.Name, data.Icon, data.APIBase, id)
+	// 替换 models
+	database.DB.Exec("DELETE FROM copilot_models WHERE provider_id=?", id)
+	for _, mname := range data.Models {
+		if mname != "" {
+			database.DB.Exec("INSERT INTO copilot_models(provider_id, name) VALUES(?,?)", id, mname)
+		}
+	}
+	c.JSON(200, gin.H{"message": "updated"})
+}
+
+func CopilotDeleteProvider(c *gin.Context) {
+	id := c.Param("id")
+	database.DB.Exec("DELETE FROM copilot_providers WHERE id=?", id)
+	c.JSON(200, gin.H{"message": "deleted"})
 }
 
 // ============================================================
 // 获取模型列表（后端代理，避免 CORS）
 // ============================================================
 
-// CopilotFetchModels 代理请求模型列表
 func CopilotFetchModels(c *gin.Context) {
 	var req struct {
 		APIBase string `json:"api_base" binding:"required"`
@@ -169,23 +219,17 @@ func CopilotFetchModels(c *gin.Context) {
 	defer resp.Body.Close()
 
 	body, _ := io.ReadAll(resp.Body)
-
 	if resp.StatusCode != 200 {
 		c.JSON(resp.StatusCode, gin.H{"error": string(body)})
 		return
 	}
 
-	// 解析 OpenAI 格式
 	var result struct {
 		Data []struct {
 			ID string `json:"id"`
 		} `json:"data"`
 	}
-	if err := json.Unmarshal(body, &result); err != nil {
-		// 直接返回原始 body
-		c.JSON(200, gin.H{"raw": string(body)})
-		return
-	}
+	json.Unmarshal(body, &result)
 
 	ids := make([]string, len(result.Data))
 	for i, item := range result.Data {
@@ -195,12 +239,15 @@ func CopilotFetchModels(c *gin.Context) {
 }
 
 // ============================================================
-// 历史记录
+// 历史记录（全局，按 session ID 过滤可选）
 // ============================================================
 
-// CopilotGetHistory 获取聊天历史
 func CopilotGetHistory(c *gin.Context) {
-	value := copilotGetValue(CopilotHistoryKey)
+	value := func() string {
+		var v string
+		database.DB.QueryRow("SELECT value FROM settings WHERE key=?", CopilotHistoryKey).Scan(&v)
+		return v
+	}()
 	if value == "" {
 		c.JSON(200, []gin.H{})
 		return
@@ -210,24 +257,25 @@ func CopilotGetHistory(c *gin.Context) {
 	c.JSON(200, history)
 }
 
-// CopilotSaveHistory 保存聊天历史（追加）
 func CopilotSaveHistory(c *gin.Context) {
 	var newMsgs []gin.H
 	if err := c.ShouldBindJSON(&newMsgs); err != nil || len(newMsgs) == 0 {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "bad request"})
 		return
 	}
-
+	value := func() string {
+		var v string
+		database.DB.QueryRow("SELECT value FROM settings WHERE key=?", CopilotHistoryKey).Scan(&v)
+		return v
+	}()
 	var existing []gin.H
-	value := copilotGetValue(CopilotHistoryKey)
-	if value != "" {
-		json.Unmarshal([]byte(value), &existing)
-	}
+	json.Unmarshal([]byte(value), &existing)
 	existing = append(existing, newMsgs...)
 	if len(existing) > 50 {
 		existing = existing[len(existing)-50:]
 	}
 	data, _ := json.Marshal(existing)
-	copilotUpsert(CopilotHistoryKey, string(data))
+	upsert := `INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`
+	database.DB.Exec(upsert, CopilotHistoryKey, string(data))
 	c.JSON(200, gin.H{"message": "saved"})
 }

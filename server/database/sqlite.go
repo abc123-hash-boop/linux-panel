@@ -57,6 +57,44 @@ func createTable() {
 
 	);
 
+	CREATE TABLE IF NOT EXISTS copilot_sessions(
+
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+
+		name TEXT NOT NULL,
+
+		model TEXT DEFAULT 'gpt-4o',
+
+		api_key TEXT DEFAULT '',
+
+		api_base TEXT DEFAULT 'https://api.openai.com/v1',
+
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+
+	);
+
+	CREATE TABLE IF NOT EXISTS copilot_providers(
+
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+
+		name TEXT UNIQUE NOT NULL,
+
+		icon TEXT DEFAULT '',
+
+		api_base TEXT NOT NULL
+
+	);
+
+	CREATE TABLE IF NOT EXISTS copilot_models(
+
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+
+		provider_id INTEGER REFERENCES copilot_providers(id) ON DELETE CASCADE,
+
+		name TEXT NOT NULL
+
+	);
+
 	`
 
 	_, err := DB.Exec(sql)

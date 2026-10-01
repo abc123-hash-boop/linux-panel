@@ -299,14 +299,6 @@ func main() {
 		 */
 
 		protected.GET(
-			"/copilot/settings",
-			panelApi.CopilotGetSettings,
-		)
-		protected.POST(
-			"/copilot/settings",
-			panelApi.CopilotSaveSettings,
-		)
-		protected.GET(
 			"/copilot/history",
 			panelApi.CopilotGetHistory,
 		)
@@ -315,12 +307,36 @@ func main() {
 			panelApi.CopilotSaveHistory,
 		)
 		protected.GET(
+			"/copilot/sessions",
+			panelApi.CopilotListSessions,
+		)
+		protected.POST(
+			"/copilot/sessions",
+			panelApi.CopilotCreateSession,
+		)
+		protected.PUT(
+			"/copilot/session/:id",
+			panelApi.CopilotUpdateSession,
+		)
+		protected.DELETE(
+			"/copilot/session/:id",
+			panelApi.CopilotDeleteSession,
+		)
+		protected.GET(
 			"/copilot/providers",
-			panelApi.CopilotGetProviders,
+			panelApi.CopilotListProviders,
 		)
 		protected.POST(
 			"/copilot/providers",
-			panelApi.CopilotSaveProviders,
+			panelApi.CopilotCreateProvider,
+		)
+		protected.PUT(
+			"/copilot/provider/:id",
+			panelApi.CopilotUpdateProvider,
+		)
+		protected.DELETE(
+			"/copilot/provider/:id",
+			panelApi.CopilotDeleteProvider,
 		)
 		protected.POST(
 			"/copilot/fetch-models",

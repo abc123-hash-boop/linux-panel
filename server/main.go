@@ -291,6 +291,41 @@ func main() {
 			"/docker/network/:id/disconnect",
 			panelApi.DockerNetworkDisconnect,
 		)
+
+		/*
+		 * ========================================================
+		 * Copilot
+		 * ========================================================
+		 */
+
+		protected.GET(
+			"/copilot/settings",
+			panelApi.CopilotGetSettings,
+		)
+		protected.POST(
+			"/copilot/settings",
+			panelApi.CopilotSaveSettings,
+		)
+		protected.GET(
+			"/copilot/history",
+			panelApi.CopilotGetHistory,
+		)
+		protected.POST(
+			"/copilot/history",
+			panelApi.CopilotSaveHistory,
+		)
+		protected.GET(
+			"/copilot/providers",
+			panelApi.CopilotGetProviders,
+		)
+		protected.POST(
+			"/copilot/providers",
+			panelApi.CopilotSaveProviders,
+		)
+		protected.POST(
+			"/copilot/fetch-models",
+			panelApi.CopilotFetchModels,
+		)
 	}
 
 	/*

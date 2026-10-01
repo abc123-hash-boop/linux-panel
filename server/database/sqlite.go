@@ -49,6 +49,14 @@ func createTable() {
 
 	);
 
+	CREATE TABLE IF NOT EXISTS settings(
+
+		key TEXT PRIMARY KEY,
+
+		value TEXT
+
+	);
+
 	`
 
 	_, err := DB.Exec(sql)

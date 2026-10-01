@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { useNavigate } from 'react-router-dom';
 import apiClient from '../api/client';
 import { 
   Play, 
@@ -18,8 +19,6 @@ import {
   FolderOpen
 } from 'lucide-react';
 import '@xterm/xterm/css/xterm.css';
-import { Terminal } from '@xterm/xterm';
-import { FitAddon } from '@xterm/addon-fit';
 
 const cn = (...classes) => classes.filter(Boolean).join(' ');
 
@@ -165,7 +164,7 @@ const ImagesView = ({ images, onPull, onDeleteImage }) => {
 };
 
 // ==================== Containers View ====================
-const ContainersView = ({ containers, onAction }) => {
+const ContainersView = ({ containers, onAction, navigate }) => {
   return containers.length === 0 ? (
     <div className="text-center py-16 text-gray-400">
       <ContainerIcon size={48} className="mx-auto mb-4 opacity-30" />
@@ -208,7 +207,7 @@ const ContainersView = ({ containers, onAction }) => {
                     )}
                     <button onClick={() => onAction(c.id, 'remove')} className="p-2 text-red-600 hover:bg-red-50 rounded-md" title="Remove"><Trash2 size={16} /></button>
                     {c.state === 'running' && (
-                      <button onClick={() => setTerminalContainer(c)} className="p-2 text-purple-600 hover:bg-purple-50 rounded-md" title="Open Terminal">
+                      <button onClick={() => navigate(`/terminal?container=${c.id}`)} className="p-2 text-purple-600 hover:bg-purple-50 rounded-md" title="Open Terminal">
                         <TerminalIcon size={16} />
                       </button>
                     )}
@@ -303,125 +302,9 @@ const ComposeView = ({ composeProjects, onUpload, onStart, onStop, onRestart, on
   );
 };
 
-// ==================== Container Terminal Modal ====================
-const ContainerTerminalModal = ({ container, onClose }) => {
-  const containerRef = useRef(null);
-  const termRef = useRef(null);
-  const wsRef = useRef(null);
-  const [status, setStatus] = useState('connecting');
-  const [error, setError] = useState('');
-
-  useEffect(() => {
-    const el = containerRef.current;
-    if (!el) return;
-
-    // 直接连接 WebSocket，传入容器 ID（后端会自动创建 exec）
-    const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${proto}//${location.host}/ws/docker/exec/${container.id}`;
-    const ws = new WebSocket(wsUrl);
-    ws.binaryType = 'arraybuffer';
-    wsRef.current = ws;
-
-    ws.onopen = () => setStatus('connected');
-    ws.onmessage = e => {
-      const bytes = e.data instanceof ArrayBuffer ? new Uint8Array(e.data) : new Uint8Array(e.data);
-      termRef.current?.write(bytes);
-    };
-    ws.onerror = () => setError('WebSocket connection failed');
-    ws.onclose = () => {
-      wsRef.current = null;
-      setStatus('disconnected');
-    };
-
-    // 创建 xterm
-    const term = new Terminal({
-      cursorBlink: true,
-      cursorStyle: 'block',
-      fontSize: 14,
-      fontFamily: '"Cascadia Code", Consolas, monospace',
-      theme: {
-        background: '#1e1e1e', foreground: '#d4d4d4', cursor: '#ffffff',
-        black: '#000000', red: '#cd3131', green: '#0dbc79', yellow: '#e5e510',
-        blue: '#2472c8', magenta: '#bc3fbc', cyan: '#11a8cd', white: '#e5e5e5',
-      },
-      scrollback: 1000,
-    });
-    termRef.current = term;
-
-    const fitAddon = new FitAddon();
-    term.loadAddon(fitAddon);
-    term.open(el);
-
-    // 输入 → WS
-    term.onData(data => {
-      if (wsRef.current?.readyState === 1) wsRef.current.send(data);
-    });
-
-    // Resize
-    const doResize = () => {
-      try {
-        fitAddon.fit();
-        if (wsRef.current?.readyState === 1) {
-          wsRef.current.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows }));
-        }
-      } catch {}
-    };
-    const ro = new ResizeObserver(() => doResize());
-    ro.observe(el);
-    window.addEventListener('resize', doResize);
-    setTimeout(doResize, 100);
-
-    // Cleanup
-    return () => {
-      ro.disconnect();
-      window.removeEventListener('resize', doResize);
-      if (wsRef.current) wsRef.current.close();
-      term.destroy();
-    };
-  }, []);
-
-  if (error) {
-    return (
-      <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
-        <div className="bg-white rounded-xl p-6 max-w-md">
-          <h3 className="font-bold text-red-600 mb-2">Error</h3>
-          <p className="text-sm text-gray-600 mb-4">{error}</p>
-          <button onClick={onClose} className="px-4 py-2 bg-gray-200 rounded-lg hover:bg-gray-300">Close</button>
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-      <div className="bg-white rounded-xl shadow-2xl w-full max-w-5xl max-h-[90vh] flex flex-col">
-        {/* Header */}
-        <div className="flex items-center justify-between px-5 py-3 border-b border-gray-200 bg-gray-50 rounded-t-xl">
-          <div className="flex items-center gap-3">
-            <TerminalIcon size={18} className="text-gray-600" />
-            <span className="font-semibold text-gray-800">Container Terminal</span>
-            <span className="text-sm text-gray-500 font-mono">— {container.name}</span>
-          </div>
-          <div className="flex items-center gap-3">
-            <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${
-              status === 'connected' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
-            }`}>
-              ● {status}
-            </span>
-            <button onClick={onClose} className="p-1.5 hover:bg-gray-200 rounded-lg transition-colors">
-              <X size={18} />
-            </button>
-          </div>
-        </div>
-        {/* Terminal */}
-        <div ref={containerRef} className="flex-1 bg-[#1e1e1e] min-h-0" />
-      </div>
-    </div>
-  );
-};
-
 // ==================== Main Docker View ====================
 const DockerView = () => {
+  const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState('containers');
   const [containers, setContainers] = useState([]);
   const [dockerInfo, setDockerInfo] = useState(null);
@@ -432,7 +315,6 @@ const DockerView = () => {
   const [pulling, setPulling] = useState(null);
   const [logsModal, setLogsModal] = useState(null);
   const [showCreate, setShowCreate] = useState(false);
-  const [terminalContainer, setTerminalContainer] = useState(null);
   const [createForm, setCreateForm] = useState({
     name: '',
     image: '',
@@ -653,7 +535,7 @@ const DockerView = () => {
           )}
         </div>
 
-        {activeTab === 'containers' && <ContainersView containers={containers} onAction={handleContainerAction} />}
+        {activeTab === 'containers' && <ContainersView containers={containers} onAction={handleContainerAction} navigate={navigate} />}
         {activeTab === 'images' && <ImagesView images={images} onPull={handleImagePull} onDeleteImage={handleDeleteImage} />}
         {activeTab === 'compose' && (
           <ComposeView
@@ -789,14 +671,6 @@ const DockerView = () => {
             </div>
           </div>
         </div>
-      )}
-
-      {/* Container Terminal Modal */}
-      {terminalContainer && (
-        <ContainerTerminalModal
-          container={terminalContainer}
-          onClose={() => setTerminalContainer(null)}
-        />
       )}
     </div>
   );

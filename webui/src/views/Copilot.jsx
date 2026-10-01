@@ -132,7 +132,8 @@ const CopilotView = () => {
       }
       setEditProvider(null);
       // 新建时选最后一个（新添加的），编辑时保持当前选中
-      await loadProviders(!editProvider);
+      const isNew = !editProvider || editProvider.id === 0;
+      await loadProviders(isNew);
     } catch (e) { console.error(e); } finally { setSaving(false); }
   };
 

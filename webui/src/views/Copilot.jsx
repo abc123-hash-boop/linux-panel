@@ -131,7 +131,8 @@ const CopilotView = () => {
         await apiClient.post('/copilot/providers', payload);
       }
       setEditProvider(null);
-      await loadProviders(true);
+      // 新建时选最后一个（新添加的），编辑时保持当前选中
+      await loadProviders(!editProvider);
     } catch (e) { console.error(e); } finally { setSaving(false); }
   };
 

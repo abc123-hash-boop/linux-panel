@@ -130,8 +130,6 @@ const CopilotView = () => {
         await apiClient.post('/copilot/providers', payload);
       }
       setEditProvider(null);
-      // 选中新添加的 provider
-      setActiveProvider({ id: editProvider?.id || Date.now(), name: editName.trim(), icon: editIcon.trim(), api_base: editAPIBase.trim(), api_key: editAPIKey, models: savedModels, _preset: false });
       await loadProviders();
     } catch (e) { console.error(e); } finally { setSaving(false); }
   };

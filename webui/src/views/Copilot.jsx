@@ -28,6 +28,8 @@ const CopilotView = () => {
   const [fetching, setFetching] = useState(false);
 
   const messagesEndRef = useRef(null);
+  const inputRef = useRef(null);
+  const providersRef = useRef([]);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [editKey, setEditKey] = useState('');
   const [savingKey, setSavingKey] = useState(null);
@@ -106,7 +108,9 @@ const CopilotView = () => {
         merged.push({ ...d, _preset: false });
       });
       setProviders(merged);
-      if (merged.length > 0 && !activeProvider) setActiveProvider(merged[0]);
+      providersRef.current = merged;
+      // 保存后选最后一个（新添加的），初始加载选第一个
+      setActiveProvider(merged[afterSave ? merged.length - 1 : 0]);
     } catch {}
   };
 

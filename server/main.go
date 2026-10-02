@@ -307,6 +307,14 @@ func main() {
 			panelApi.CopilotSaveHistory,
 		)
 		protected.GET(
+			"/copilot/recent/:id",
+			panelApi.CopilotGetRecentMessages,
+		)
+		protected.POST(
+			"/copilot/chat",
+			panelApi.CopilotChat,
+		)
+		protected.GET(
 			"/copilot/sessions",
 			panelApi.CopilotListSessions,
 		)

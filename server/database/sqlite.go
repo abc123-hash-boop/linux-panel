@@ -95,6 +95,20 @@ func createTable() {
 
 	);
 
+	CREATE TABLE IF NOT EXISTS copilot_messages(
+
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+
+		session_id INTEGER NOT NULL,
+
+		role TEXT NOT NULL,
+
+		content TEXT NOT NULL,
+
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+
+	);
+
 	`
 
 	_, err := DB.Exec(sql)

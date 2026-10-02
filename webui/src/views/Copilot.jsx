@@ -31,6 +31,25 @@ const CopilotView = () => {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [editKey, setEditKey] = useState('');
   const [savingKey, setSavingKey] = useState(null);
+  const [showAddForm, setShowAddForm] = useState(false);
+  const [newName, setNewName] = useState('');
+  const [newIcon, setNewIcon] = useState('');
+  const [newBase, setNewBase] = useState('');
+  const [savingNew, setSavingNew] = useState(false);
+
+  const addProvider = async () => {
+    if (!newName.trim() || !newBase.trim()) return;
+    setSavingNew(true);
+    try {
+      await apiClient.post('/copilot/providers', { name: newName.trim(), icon: newIcon.trim(), api_base: newBase.trim() });
+      await loadProviders();
+      // loadProviders 后 providers state 已更新，选最后一个
+      setTimeout(() => {
+        const last = providers[providers.length - 1];
+        if (last) { setActiveProvider(last); setAllModels({}); }
+      }, 0);
+    } catch (e) { console.error(e); } finally { setSavingNew(false); setShowAddForm(false); setNewName(''); setNewIcon(''); setNewBase(''); }
+  };
 
   useEffect(() => { loadSessions(); loadProviders(); }, []);
   useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages]);
@@ -282,22 +301,49 @@ const CopilotView = () => {
 
             <div className="flex-1 overflow-y-auto p-6 space-y-5">
               {/* Provider 选择 */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">选择 Provider</label>
-                <select
-                  value={activeProvider?.id || ''}
-                  onChange={e => {
-                    const id = parseInt(e.target.value);
-                    const prov = providers.find(p => p.id === id);
-                    if (prov) selectModel(prov);
-                  }}
-                  className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm outline-none focus:ring-2 focus:ring-violet-500 bg-white"
-                >
-                  {providers.map(p => (
-                    <option key={p.id} value={p.id}>{p.icon} {p.name}{p._preset ? ' (预设)' : ''}</option>
-                  ))}
-                </select>
+              <div className="flex gap-2 items-start">
+                <div className="flex-1">
+                  <label className="block text-sm font-medium text-gray-700 mb-2">选择 Provider</label>
+                  <select
+                    value={activeProvider?.id || ''}
+                    onChange={e => {
+                      const id = parseInt(e.target.value);
+                      const prov = providers.find(p => p.id === id);
+                      if (prov) selectModel(prov);
+                    }}
+                    className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm outline-none focus:ring-2 focus:ring-violet-500 bg-white"
+                  >
+                    {providers.map(p => (
+                      <option key={p.id} value={p.id}>{p.icon} {p.name}{p._preset ? ' (预设)' : ''}</option>
+                    ))}
+                  </select>
+                </div>
+                <button onClick={() => setShowAddForm(!showAddForm)}
+                  className="mt-7 px-3 bg-violet-600 text-white rounded-lg text-sm hover:bg-violet-700 transition-colors whitespace-nowrap">
+                  + 新建
+                </button>
               </div>
+
+              {/* 新建 Provider 表单 */}
+              {showAddForm && (
+                <div className="p-4 bg-gray-50 rounded-lg space-y-3">
+                  <div className="flex gap-2">
+                    <input type="text" value={newName} onChange={e => setNewName(e.target.value)} placeholder="名称" maxLength={30}
+                      className="flex-1 px-3 py-2 border border-gray-200 rounded-lg text-sm outline-none focus:ring-2 focus:ring-violet-500" />
+                    <input type="text" value={newIcon} onChange={e => setNewIcon(e.target.value)} placeholder="图标" maxLength={2}
+                      className="w-16 px-2 py-2 border border-gray-200 rounded-lg text-sm text-center outline-none focus:ring-2 focus:ring-violet-500" />
+                  </div>
+                  <input type="text" value={newBase} onChange={e => setNewBase(e.target.value)} placeholder="API Base URL (https://...)"
+                    className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm font-mono outline-none focus:ring-2 focus:ring-violet-500" />
+                  <div className="flex justify-end gap-2">
+                    <button onClick={() => setShowAddForm(false)} className="px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-100 rounded-lg">取消</button>
+                    <button onClick={addProvider} disabled={savingNew || !newName.trim() || !newBase.trim()}
+                      className="px-3 py-1.5 text-sm bg-violet-600 text-white rounded-lg hover:bg-violet-700 disabled:opacity-50">
+                      {savingNew ? '创建中...' : '创建'}
+                    </button>
+                  </div>
+                </div>
+              )}
 
               {activeProvider && (
                 <>

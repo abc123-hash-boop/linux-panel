@@ -235,7 +235,8 @@ const CopilotView = () => {
         messages: history.map(m => ({ role: m.role, content: m.content })),
         recall_sessions: recallSessions,
       });
-      const reply = res.data.reply || '（无回复）';
+      const rawReply = res.data.reply || '（无回复）';
+      const reply = typeof rawReply === 'string' ? rawReply.replace(/[<|][a-z_|]+[>|]|\n/g, ' ').trim() : rawReply;
       setMessages(prev => [...prev, { role: 'assistant', content: reply }]);
       if (res.data.model) {
         setActiveModel(res.data.model);

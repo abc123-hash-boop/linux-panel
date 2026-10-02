@@ -334,7 +334,11 @@ const CopilotView = () => {
                   <div>
                     <label className="block text-xs font-medium text-gray-500 mb-1">API Base URL</label>
                     <input type="text" value={activeProvider.api_base || ''}
-                      onChange={e => setActiveProvider({ ...activeProvider, api_base: e.target.value })}
+                      onChange={e => {
+                        const updated = { ...activeProvider, api_base: e.target.value };
+                        setActiveProvider(updated);
+                        setProviders(prev => prev.map(p => p.id === activeProvider.id ? updated : p));
+                      }}
                       className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm font-mono outline-none focus:ring-2 focus:ring-violet-500" />
                   </div>
 
@@ -346,15 +350,23 @@ const CopilotView = () => {
                         onChange={e => setEditKey(e.target.value)}
                         placeholder="sk-..."
                         className="flex-1 px-3 py-2 border border-gray-200 rounded-lg text-sm font-mono outline-none focus:ring-2 focus:ring-violet-500" />
-                      {!activeProvider._preset && (
-                        <button onClick={saveApiKey}
-                          disabled={savingKey === activeProvider.id}
-                          className="px-3 bg-violet-600 text-white rounded-lg text-sm hover:bg-violet-700 disabled:opacity-50 transition-colors">
-                          {savingKey === activeProvider.id ? <Loader2 size={14} className="animate-spin" /> : '保存'}
-                        </button>
-                      )}
+                      <button onClick={() => {
+                        const updated = { ...activeProvider, api_key: editKey };
+                        setActiveProvider(updated);
+                        setProviders(prev => prev.map(p => p.id === activeProvider.id ? updated : p));
+                        if (!activeProvider._preset) {
+                          setSavingKey(activeProvider.id);
+                          apiClient.put(`/copilot/provider/${activeProvider.id}`, { name: activeProvider.name, icon: activeProvider.icon, api_base: activeProvider.api_base, models: [], api_key: editKey })
+                            .catch(() => {})
+                            .finally(() => setSavingKey(null));
+                        }
+                        setEditKey('');
+                      }}
+                        disabled={savingKey === activeProvider.id}
+                        className="px-3 bg-violet-600 text-white rounded-lg text-sm hover:bg-violet-700 disabled:opacity-50 transition-colors">
+                        {savingKey === activeProvider.id ? <Loader2 size={14} className="animate-spin" /> : '保存'}
+                      </button>
                     </div>
-                    {activeProvider._preset && <p className="text-xs text-gray-400 mt-1">预设 Provider，Key 仅保存在当前会话</p>}
                   </div>
 
                   {/* Model 选择 */}

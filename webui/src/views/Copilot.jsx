@@ -39,38 +39,12 @@ const CopilotView = () => {
   const [toolCalls, setToolCalls] = useState([]);
   const [expandedSessions, setExpandedSessions] = useState({});
   const [expandedMessages, setExpandedMessages] = useState({});
-
-  // AI 自动命名会话
-  const autoNameSession = async (sid, messages) => {
-    if (!sid || !messages || messages.length < 2) return;
-    try {
-      const lastUserMsg = messages.filter(m => m.role === 'user').pop();
-      if (!lastUserMsg) return;
-      const res = await apiClient.post('/copilot/chat', {
-        session_id: sid,
-        api_key: activeProvider?.api_key || '',
-        api_base: activeProvider?.api_base || '',
-        model: activeModel || 'gpt-4o',
-        messages: [{ role: 'user', content: `请用中文简洁概括这个对话的主题，最多10个字，直接返回主题文字，不要加任何标点或说明。对话内容：${lastUserMsg.content}` }],
-        tools: [],
-        tool_choice: "none"
-      });
-      const name = (res.data.reply || '新对话').trim().slice(0, 20);
-      if (name && name !== '新对话') {
-        await apiClient.put(`/copilot/session/${sid}`, { name });
-        setSessions(prev => prev.map(s => s.id === sid ? { ...s, name } : s));
-      }
-    } catch {}
-  };
-
-  // 跨会话回忆：选中哪些其他会话作为上下文
   const [recallSessions, setRecallSessions] = useState([]);
 
   const messagesEndRef = useRef(null);
   const activeSessionIdRef = useRef(null);
 
   useEffect(() => { activeSessionIdRef.current = activeSessionId; }, [activeSessionId]);
-
   useEffect(() => { loadSessions(); loadProviders(); }, []);
   useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages]);
   useEffect(() => {
@@ -97,7 +71,6 @@ const CopilotView = () => {
 
   const restoreSessionConfig = (session) => {
     if (!session) return;
-    // 恢复 provider（通过 api_base 匹配，从 providers 列表获取 api_key）
     if (session.api_base) {
       const prov = providers.find(p => p.api_base === session.api_base);
       if (prov) {
@@ -105,14 +78,12 @@ const CopilotView = () => {
         return;
       }
     }
-    // 如果没有匹配的 provider，创建一个临时的
     if (session.api_base) {
       setActiveProvider({
         id: -1, name: '自定义', icon: '🔧',
         api_base: session.api_base, api_key: '', _preset: false
       });
     }
-    // 恢复 model
     if (session.model) setActiveModel(session.model);
   };
 
@@ -140,7 +111,6 @@ const CopilotView = () => {
       setActiveSessionId(newSession.id);
       setMessages([]);
       setRecallSessions(JSON.parse(newSession.recall_sessions || '[]'));
-      // 恢复 provider 配置
       if (newSession.api_base) {
         const prov = providers.find(p => p.api_base === newSession.api_base);
         if (prov) {
@@ -165,21 +135,6 @@ const CopilotView = () => {
         }
         return remaining;
       });
-    } catch {}
-  };
-    } catch {}
-  };
-
-  const deleteSession = async (sid) => {
-    try {
-      await apiClient.delete(`/copilot/session/${sid}`);
-      const remaining = sessions.filter(s => s.id !== sid);
-      setSessions(remaining);
-      if (activeSessionId === sid) {
-        setActiveSessionId(remaining[0]?.id || null);
-        setMessages([]);
-        setRecallSessions([]);
-      }
     } catch {}
   };
 
@@ -238,7 +193,6 @@ const CopilotView = () => {
 
   const selectProvider = async (prov) => {
     setActiveProvider(prov);
-    // 自动选择缓存中的第一个模型
     if (allModels[prov.id]?.length > 0 && !activeModel) {
       setActiveModel(allModels[prov.id][0]);
     }
@@ -254,16 +208,35 @@ const CopilotView = () => {
     setSessions(prev => prev.map(s => s.id === activeSessionId ? { ...s, recall_sessions: JSON.stringify(recallSessions) } : s));
   };
 
+  const autoNameSession = async (sid, messages) => {
+    if (!sid || !messages || messages.length < 2) return;
+    try {
+      const lastUserMsg = messages.filter(m => m.role === 'user').pop();
+      if (!lastUserMsg) return;
+      const res = await apiClient.post('/copilot/chat', {
+        session_id: sid,
+        api_key: activeProvider?.api_key || '',
+        api_base: activeProvider?.api_base || '',
+        model: activeModel || 'gpt-4o',
+        messages: [{ role: 'user', content: `请用中文简洁概括这个对话的主题，最多10个字，直接返回主题文字，不要加任何标点或说明。对话内容：${lastUserMsg.content}` }],
+        tools: [],
+        tool_choice: "none"
+      });
+      const name = (res.data.reply || '新对话').trim().slice(0, 20);
+      if (name && name !== '新对话') {
+        await apiClient.put(`/copilot/session/${sid}`, { name });
+        setSessions(prev => prev.map(s => s.id === sid ? { ...s, name } : s));
+      }
+    } catch {}
+  };
+
   const getContextTokens = () => {
-    // 估算 token 数：中文约 1 字 1 token，英文约 4 字符 1 token
     let tokens = 0;
     messages.forEach(m => {
-      tokens += m.content.length; // 粗略估算
+      tokens += m.content.length;
     });
-    // 加上 recall 会话的消息
     recallSessions.forEach(sid => {
-      const session = sessions.find(s => s.id === sid);
-      if (session) tokens += 200; // 每个 recall 会话约 200 token
+      tokens += 200;
     });
     return tokens;
   };
@@ -322,7 +295,6 @@ const CopilotView = () => {
       const histRes = await apiClient.get(`/copilot/history?session_id=${activeSessionId}`);
       if (Array.isArray(histRes.data)) {
         setMessages(histRes.data);
-        // 首次对话后 AI 自动命名
         if (histRes.data.length >= 2 && (!sessions.find(s => s.id === activeSessionId)?.name || sessions.find(s => s.id === activeSessionId)?.name === '新对话')) {
           autoNameSession(activeSessionId, histRes.data);
         }
@@ -362,14 +334,12 @@ const CopilotView = () => {
                   e.stopPropagation();
                   const wasExpanded = expandedSessions[s.id];
                   setExpandedSessions(prev => ({ ...prev, [s.id]: !wasExpanded }));
-                  // 加载消息历史
                   if (!wasExpanded && !expandedMessages[s.id]) {
                     apiClient.get(`/copilot/history?session_id=${s.id}`).then(res => {
                       if (Array.isArray(res.data)) setExpandedMessages(prev => ({ ...prev, [s.id]: res.data }));
                     }).catch(() => {});
                   }
-                }}
-                  className="p-0.5 text-gray-400 hover:text-violet-600 rounded transition-colors shrink-0">
+                }} className="p-0.5 text-gray-400 hover:text-violet-600 rounded transition-colors shrink-0">
                   <svg className={`w-3 h-3 transition-transform ${expandedSessions[s.id] ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
                   </svg>
@@ -392,7 +362,6 @@ const CopilotView = () => {
           {sessions.length === 0 && <div className="px-3 py-6 text-center text-xs text-gray-400">暂无会话</div>}
         </div>
 
-        {/* 跨会话回忆入口 */}
         {sessions.length > 1 && (
           <div className="px-3 py-2 border-t border-gray-100">
             <button onClick={() => setSettingsOpen(true)} className="flex items-center gap-1.5 w-full text-xs text-gray-500 hover:text-violet-600 transition-colors">
@@ -474,7 +443,6 @@ const CopilotView = () => {
 
         {error && <div className="mx-4 mb-2 px-4 py-2 bg-red-50 border border-red-200 text-red-600 text-sm rounded-lg">{error}</div>}
 
-        {/* 上下文窗口指示器 */}
         <div className="px-4 py-1.5 border-t border-gray-100 flex items-center gap-2">
           <div className="flex-1 h-1 bg-gray-100 rounded-full overflow-hidden">
             <div className={`h-full rounded-full transition-all ${contextPercent > 80 ? 'bg-red-500' : contextPercent > 50 ? 'bg-yellow-500' : 'bg-violet-500'}`}
@@ -518,7 +486,6 @@ const CopilotView = () => {
             </div>
 
             <div className="flex-1 overflow-y-auto p-6 space-y-5">
-              {/* Provider 选择 */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">选择 Provider</label>
                 <select
@@ -536,13 +503,11 @@ const CopilotView = () => {
                 </select>
               </div>
 
-              {/* 新建按钮 */}
               <button onClick={() => setShowAddForm(!showAddForm)}
                 className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-violet-600 hover:bg-violet-50 rounded-lg transition-colors">
                 <Plus size={14} /> 新建 Provider
               </button>
 
-              {/* 新建表单 */}
               {showAddForm && (
                 <div className="p-4 bg-gray-50 rounded-lg space-y-3">
                   <div className="flex gap-2">
@@ -565,7 +530,6 @@ const CopilotView = () => {
 
               {activeProvider && (
                 <>
-                  {/* Base URL */}
                   <div>
                     <label className="block text-xs font-medium text-gray-500 mb-1">API Base URL</label>
                     <input type="text" value={activeProvider.api_base || ''}
@@ -577,7 +541,6 @@ const CopilotView = () => {
                       className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm font-mono outline-none focus:ring-2 focus:ring-violet-500" />
                   </div>
 
-                  {/* API Key */}
                   <div>
                     <label className="block text-xs font-medium text-gray-500 mb-1">API Key</label>
                     <div className="flex gap-2">
@@ -593,7 +556,6 @@ const CopilotView = () => {
                     </div>
                   </div>
 
-                  {/* Model 输入 */}
                   <div>
                     <label className="block text-xs font-medium text-gray-500 mb-1">Model</label>
                     <input type="text" value={activeModel}
@@ -611,7 +573,6 @@ const CopilotView = () => {
                       className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm font-mono outline-none focus:ring-2 focus:ring-violet-500" />
                   </div>
 
-                  {/* 从 API 获取的模型 */}
                   {allModels[activeProvider.id] !== undefined && allModels[activeProvider.id].length > 0 && (
                     <div>
                       <label className="block text-xs font-medium text-gray-500 mb-1">可用模型（点击选中）</label>
@@ -626,14 +587,12 @@ const CopilotView = () => {
                     </div>
                   )}
 
-                  {/* 加载/重试 */}
                   {allModels[activeProvider.id] === undefined && !fetching && activeProvider.api_base && (
                     <button onClick={() => { setFetching(true); loadModels(activeProvider).finally(() => setFetching(false)); }}
                       className="text-xs text-violet-600 hover:underline">加载模型列表</button>
                   )}
                   {fetching && <p className="text-xs text-gray-400">加载中...</p>}
 
-                  {/* 跨会话回忆设置 */}
                   {sessions.length > 1 && (
                     <div>
                       <label className="block text-xs font-medium text-gray-500 mb-2 flex items-center gap-1.5">

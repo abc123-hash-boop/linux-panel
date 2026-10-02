@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import apiClient from '../api/client';
-import { Send, Bot, User, Sparkles, Settings, MessageSquare, Loader2 } from 'lucide-react';
+import { Send, Bot, User, Sparkles, Settings, MessageSquare, Loader2, Plus, Trash2 } from 'lucide-react';
 
 const PRESET_PROVIDERS = [
   { name: 'OpenAI', icon: '🟢', api_base: 'https://api.openai.com/v1' },
@@ -21,15 +21,11 @@ const CopilotView = () => {
   const [error, setError] = useState('');
 
   const [providers, setProviders] = useState([]);
-  const [dbProviders, setDbProviders] = useState([]);
   const [activeProvider, setActiveProvider] = useState(null);
   const [allModels, setAllModels] = useState({});
   const [activeModel, setActiveModel] = useState('');
   const [fetching, setFetching] = useState(false);
 
-  const messagesEndRef = useRef(null);
-  const inputRef = useRef(null);
-  const providersRef = useRef([]);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [editKey, setEditKey] = useState('');
   const [savingKey, setSavingKey] = useState(null);
@@ -39,17 +35,7 @@ const CopilotView = () => {
   const [newBase, setNewBase] = useState('');
   const [savingNew, setSavingNew] = useState(false);
 
-  const addProvider = async () => {
-    if (!newName.trim() || !newBase.trim()) return;
-    setSavingNew(true);
-    try {
-      await apiClient.post('/copilot/providers', { name: newName.trim(), icon: newIcon.trim(), api_base: newBase.trim() });
-      await loadProviders();
-      // 用 ref 获取最新 providers
-      const last = providersRef.current[providersRef.current.length - 1];
-      if (last) { setActiveProvider(last); setAllModels({}); }
-    } catch (e) { console.error(e); } finally { setSavingNew(false); setShowAddForm(false); setNewName(''); setNewIcon(''); setNewBase(''); }
-  };
+  const messagesEndRef = useRef(null);
 
   useEffect(() => { loadSessions(); loadProviders(); }, []);
   useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages]);
@@ -79,13 +65,6 @@ const CopilotView = () => {
     } catch {}
   };
 
-  const updateSession = async (sid, data) => {
-    try {
-      await apiClient.put(`/copilot/session/${sid}`, data);
-      setSessions(prev => prev.map(s => s.id === sid ? { ...s, ...data } : s));
-    } catch {}
-  };
-
   const deleteSession = async (sid) => {
     try {
       await apiClient.delete(`/copilot/session/${sid}`);
@@ -95,11 +74,10 @@ const CopilotView = () => {
     } catch {}
   };
 
-  const loadProviders = async () => {
+  const loadProviders = async (afterSave) => {
     try {
       const res = await apiClient.get('/copilot/providers');
       const db = Array.isArray(res.data) ? res.data : [];
-      setDbProviders(db);
       const merged = PRESET_PROVIDERS.map(p => {
         const found = db.find(d => d.name === p.name);
         return found ? { ...found, _preset: true } : { id: 0, name: p.name, icon: p.icon, api_base: p.api_base, api_key: '', _preset: true };
@@ -108,14 +86,17 @@ const CopilotView = () => {
         merged.push({ ...d, _preset: false });
       });
       setProviders(merged);
-      providersRef.current = merged;
-      // 保存后选最后一个（新添加的），初始加载选第一个
-      setActiveProvider(merged[afterSave ? merged.length - 1 : 0]);
+      // 新建后选最后一个，初始加载选第一个
+      if (afterSave) {
+        setActiveProvider(merged[merged.length - 1]);
+      } else if (merged.length > 0 && !activeProvider) {
+        setActiveProvider(merged[0]);
+      }
     } catch {}
   };
 
   const loadModels = async (prov) => {
-    if (!prov?.api_base) return {};
+    if (!prov?.api_base) return [];
     if (allModels[prov.id]) return allModels[prov.id];
     try {
       const res = await apiClient.post('/copilot/fetch-models', { api_base: prov.api_base, api_key: prov.api_key || '' });
@@ -127,39 +108,43 @@ const CopilotView = () => {
     return [];
   };
 
-  const saveApiKey = async (prov) => {
-    if (!prov || !prov.id || prov._preset) return;
-    setSavingKey(prov.id);
+  const addProvider = async () => {
+    if (!newName.trim() || !newBase.trim()) return;
+    setSavingNew(true);
     try {
-      await apiClient.put(`/copilot/provider/${prov.id}`, { name: prov.name, icon: prov.icon, api_base: prov.api_base, models: prov.models || [], api_key: editKey });
-      const updated = { ...prov, api_key: editKey };
+      await apiClient.post('/copilot/providers', { name: newName.trim(), icon: newIcon.trim(), api_base: newBase.trim() });
+      await loadProviders(true);
+      setEditKey('');
+    } catch (e) { console.error(e); } finally { setSavingNew(false); setShowAddForm(false); setNewName(''); setNewIcon(''); setNewBase(''); }
+  };
+
+  const saveApiKey = async () => {
+    if (!activeProvider || activeProvider._preset) return;
+    setSavingKey(activeProvider.id);
+    try {
+      await apiClient.put(`/copilot/provider/${activeProvider.id}`, { name: activeProvider.name, icon: activeProvider.icon, api_base: activeProvider.api_base, models: [], api_key: editKey });
+      const updated = { ...activeProvider, api_key: editKey };
       setActiveProvider(updated);
-      setProviders(prev => prev.map(p => p.id === prov.id ? updated : p));
-      setDbProviders(prev => prev.map(p => p.id === prov.id ? updated : p));
+      setProviders(prev => prev.map(p => p.id === activeProvider.id ? updated : p));
     } catch {} finally { setSavingKey(null); }
   };
 
-  const selectModel = async (prov) => {
+  const selectProvider = async (prov) => {
     setActiveProvider(prov);
     const models = await loadModels(prov);
-    const session = sessions.find(s => s.id === activeSessionId);
-    if (models.length > 0 && (!session?.model || !models.includes(session.model))) {
-      setActiveModel(models[0]);
-    } else if (models.length === 0 && session?.model) {
-      setActiveModel(session.model);
-    }
+    setActiveModel(prov.model || models[0] || '');
   };
 
   const sendMessage = async () => {
     const text = input.trim();
     if (!text || loading) return;
-    if (!activeProvider) { setError('请先选择 Provider'); return; }
+    if (!activeProvider) { setError('请先在设置中选择 Provider'); return; }
     if (!activeProvider.api_key) { setError('请先在设置中填写 API Key'); setSettingsOpen(true); return; }
     if (!activeProvider.api_base) { setError('请先在设置中填写 Base URL'); setSettingsOpen(true); return; }
 
     setError('');
     const session = sessions.find(s => s.id === activeSessionId);
-    const model = session?.model || activeModel || allModels[activeProvider.id]?.[0] || 'gpt-4o';
+    const model = activeModel || session?.model || allModels[activeProvider.id]?.[0] || 'gpt-4o';
 
     setMessages(prev => [...prev, { role: 'user', content: text }]);
     setInput('');
@@ -184,10 +169,6 @@ const CopilotView = () => {
       const reply = data.choices?.[0]?.message?.content || '（无回复）';
       setMessages(prev => [...prev, { role: 'assistant', content: reply }]);
       try { await apiClient.post('/copilot/history', [...history, { role: 'assistant', content: reply }]); } catch {}
-      // 保存 model 到 session
-      if (model && model !== (session?.model || '')) {
-        updateSession(activeSessionId, { model });
-      }
     } catch (err) {
       setError(err.message || '请求失败');
       setMessages(prev => [...prev, { role: 'assistant', content: `⚠️ ${err.message}` }]);
@@ -211,7 +192,7 @@ const CopilotView = () => {
               <MessageSquare size={14} className="text-gray-400 shrink-0" />
               <span className="flex-1 text-sm text-gray-700 truncate">{s.name}</span>
               <button onClick={e => { e.stopPropagation(); deleteSession(s.id); }}
-                className="opacity-0 group-hover:opacity-100 p-1 text-gray-400 hover:text-red-500 rounded transition-all"><Sparkles size={12} className="rotate-45" /></button>
+                className="opacity-0 group-hover:opacity-100 p-1 text-gray-400 hover:text-red-500 rounded transition-all"><Trash2 size={12} /></button>
             </div>
           ))}
           {sessions.length === 0 && <div className="px-3 py-6 text-center text-xs text-gray-400">暂无会话</div>}
@@ -242,7 +223,7 @@ const CopilotView = () => {
             <div className="flex flex-col items-center justify-center h-full text-gray-400 space-y-3">
               <div className="w-12 h-12 bg-violet-100 rounded-xl flex items-center justify-center"><Sparkles className="text-violet-500" size={24} /></div>
               <p className="text-sm">开始与 Copilot 对话</p>
-              <p className="text-xs text-gray-300">右侧设置中选择 Provider 和 API Key</p>
+              <p className="text-xs text-gray-300">点击右上角 ⚙️ 选择 Provider</p>
             </div>
           )}
           {messages.map((msg, i) => (
@@ -296,37 +277,37 @@ const CopilotView = () => {
             <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between bg-gradient-to-r from-violet-50 to-purple-50 shrink-0">
               <div>
                 <h2 className="font-bold text-gray-800 text-lg">Model Providers</h2>
-                <p className="text-xs text-gray-400 mt-0.5">从服务端下拉选择并配置 API Key</p>
+                <p className="text-xs text-gray-400 mt-0.5">选择 Provider 并配置 API Key</p>
               </div>
               <button onClick={() => setSettingsOpen(false)} className="text-gray-400 hover:text-gray-600 text-2xl leading-none">×</button>
             </div>
 
             <div className="flex-1 overflow-y-auto p-6 space-y-5">
               {/* Provider 选择 */}
-              <div className="flex gap-2 items-start">
-                <div className="flex-1">
-                  <label className="block text-sm font-medium text-gray-700 mb-2">选择 Provider</label>
-                  <select
-                    value={activeProvider?.id || ''}
-                    onChange={e => {
-                      const id = parseInt(e.target.value);
-                      const prov = providers.find(p => p.id === id);
-                      if (prov) selectModel(prov);
-                    }}
-                    className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm outline-none focus:ring-2 focus:ring-violet-500 bg-white"
-                  >
-                    {providers.map(p => (
-                      <option key={p.id} value={p.id}>{p.icon} {p.name}{p._preset ? ' (预设)' : ''}</option>
-                    ))}
-                  </select>
-                </div>
-                <button onClick={() => setShowAddForm(!showAddForm)}
-                  className="mt-7 px-3 bg-violet-600 text-white rounded-lg text-sm hover:bg-violet-700 transition-colors whitespace-nowrap">
-                  + 新建
-                </button>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">选择 Provider</label>
+                <select
+                  value={activeProvider?.id || ''}
+                  onChange={e => {
+                    const id = parseInt(e.target.value);
+                    const prov = providers.find(p => p.id === id);
+                    if (prov) selectProvider(prov);
+                  }}
+                  className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm outline-none focus:ring-2 focus:ring-violet-500 bg-white"
+                >
+                  {providers.map(p => (
+                    <option key={p.id} value={p.id}>{p.icon} {p.name}{p._preset ? ' (预设)' : ''}</option>
+                  ))}
+                </select>
               </div>
 
-              {/* 新建 Provider 表单 */}
+              {/* 新建按钮 */}
+              <button onClick={() => setShowAddForm(!showAddForm)}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-violet-600 hover:bg-violet-50 rounded-lg transition-colors">
+                <Plus size={14} /> 新建 Provider
+              </button>
+
+              {/* 新建表单 */}
               {showAddForm && (
                 <div className="p-4 bg-gray-50 rounded-lg space-y-3">
                   <div className="flex gap-2">
@@ -366,14 +347,14 @@ const CopilotView = () => {
                         placeholder="sk-..."
                         className="flex-1 px-3 py-2 border border-gray-200 rounded-lg text-sm font-mono outline-none focus:ring-2 focus:ring-violet-500" />
                       {!activeProvider._preset && (
-                        <button onClick={() => { saveApiKey({ ...activeProvider, api_key: editKey }); setEditKey(''); }}
+                        <button onClick={saveApiKey}
                           disabled={savingKey === activeProvider.id}
                           className="px-3 bg-violet-600 text-white rounded-lg text-sm hover:bg-violet-700 disabled:opacity-50 transition-colors">
                           {savingKey === activeProvider.id ? <Loader2 size={14} className="animate-spin" /> : '保存'}
                         </button>
                       )}
                     </div>
-                    {activeProvider._preset && <p className="text-xs text-gray-400 mt-1">预设 Provider，Key 仅保存在本地会话</p>}
+                    {activeProvider._preset && <p className="text-xs text-gray-400 mt-1">预设 Provider，Key 仅保存在当前会话</p>}
                   </div>
 
                   {/* Model 选择 */}

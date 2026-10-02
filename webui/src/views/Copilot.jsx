@@ -71,11 +71,11 @@ const CopilotView = () => {
 
   const restoreSessionConfig = (session) => {
     if (!session) return;
-    // 恢复 provider（通过 api_base 匹配）
+    // 恢复 provider（通过 api_base 匹配，从 providers 列表获取 api_key）
     if (session.api_base) {
       const prov = providers.find(p => p.api_base === session.api_base);
       if (prov) {
-        setActiveProvider({ ...prov, api_key: session.api_key || '' });
+        setActiveProvider(prov);
         return;
       }
     }
@@ -83,7 +83,7 @@ const CopilotView = () => {
     if (session.api_base) {
       setActiveProvider({
         id: -1, name: '自定义', icon: '🔧',
-        api_base: session.api_base, api_key: session.api_key || '', _preset: false
+        api_base: session.api_base, api_key: '', _preset: false
       });
     }
     // 恢复 model
@@ -166,21 +166,13 @@ const CopilotView = () => {
   };
 
   const saveApiKey = async () => {
-    if (!activeProvider) return;
+    if (!activeProvider || activeProvider._preset) return;
     setSavingKey(activeProvider.id);
     try {
-      // 保存到 provider（仅自定义 provider）
-      if (!activeProvider._preset) {
-        await apiClient.put(`/copilot/provider/${activeProvider.id}`, { name: activeProvider.name, icon: activeProvider.icon, api_base: activeProvider.api_base, models: [], api_key: editKey });
-      }
-      // 保存到当前会话
+      await apiClient.put(`/copilot/provider/${activeProvider.id}`, { name: activeProvider.name, icon: activeProvider.icon, api_base: activeProvider.api_base, models: [], api_key: editKey });
       const updated = { ...activeProvider, api_key: editKey };
       setActiveProvider(updated);
       setProviders(prev => prev.map(p => p.id === activeProvider.id ? updated : p));
-      if (activeSessionId) {
-        await apiClient.put(`/copilot/session/${activeSessionId}`, { name: '', model: activeModel, api_base: activeProvider.api_base });
-        setSessions(prev => prev.map(s => s.id === activeSessionId ? { ...s, api_base: activeProvider.api_base } : s));
-      }
     } catch {} finally { setSavingKey(null); }
   };
 

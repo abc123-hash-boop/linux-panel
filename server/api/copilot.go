@@ -118,7 +118,7 @@ type ModelItem struct {
 }
 
 func CopilotListProviders(c *gin.Context) {
-	rows, err := database.DB.Query("SELECT id, name, icon, api_base FROM copilot_providers ORDER BY id")
+	rows, err := database.DB.Query("SELECT id, name, icon, api_base, COALESCE(api_key,'') FROM copilot_providers ORDER BY id")
 	if err != nil {
 		c.JSON(500, gin.H{"error": "db error"})
 		return
@@ -128,7 +128,7 @@ func CopilotListProviders(c *gin.Context) {
 	var providers []Provider
 	for rows.Next() {
 		var p Provider
-		rows.Scan(&p.ID, &p.Name, &p.Icon, &p.APIBase)
+		rows.Scan(&p.ID, &p.Name, &p.Icon, &p.APIBase, &p.APIKey)
 		// 加载该 provider 的 models
 		mrows, _ := database.DB.Query("SELECT id, name FROM copilot_models WHERE provider_id=?", p.ID)
 		for mrows.Next() {

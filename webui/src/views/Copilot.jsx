@@ -117,6 +117,7 @@ const CopilotView = () => {
   };
 
   const loadSessionMessages = async () => {
+    if (!activeSessionId) return;
     try {
       const res = await apiClient.get(`/copilot/history?session_id=${activeSessionId}`);
       if (Array.isArray(res.data)) setMessages(res.data);
@@ -126,13 +127,46 @@ const CopilotView = () => {
   const createSession = async () => {
     try {
       const res = await apiClient.post('/copilot/sessions', { name: '新对话' });
-      const newSession = { id: res.data.id, name: res.data.name, model: res.data.model, api_key: res.data.api_key, api_base: res.data.api_base, recall_sessions: res.data.recall_sessions || '[]' };
+      if (!res?.data) return;
+      const newSession = {
+        id: res.data.id,
+        name: res.data.name || '新对话',
+        model: res.data.model || '',
+        api_key: res.data.api_key || '',
+        api_base: res.data.api_base || '',
+        recall_sessions: res.data.recall_sessions || '[]'
+      };
       setSessions(prev => [...prev, newSession]);
-      setActiveSessionId(res.data.id);
+      setActiveSessionId(newSession.id);
       setMessages([]);
       setRecallSessions(JSON.parse(newSession.recall_sessions || '[]'));
-      setActiveProvider({ ...newSession, _preset: false });
-      if (res.data.model) setActiveModel(res.data.model);
+      // 恢复 provider 配置
+      if (newSession.api_base) {
+        const prov = providers.find(p => p.api_base === newSession.api_base);
+        if (prov) {
+          setActiveProvider(prov);
+        } else {
+          setActiveProvider({ id: -1, name: '自定义', icon: '🔧', api_base: newSession.api_base, api_key: '', _preset: false });
+        }
+      }
+      if (newSession.model) setActiveModel(newSession.model);
+    } catch {}
+  };
+
+  const deleteSession = async (sid) => {
+    try {
+      await apiClient.delete(`/copilot/session/${sid}`);
+      setSessions(prev => {
+        const remaining = prev.filter(s => s.id !== sid);
+        if (activeSessionId === sid) {
+          setActiveSessionId(remaining[0]?.id || null);
+          setMessages([]);
+          setRecallSessions([]);
+        }
+        return remaining;
+      });
+    } catch {}
+  };
     } catch {}
   };
 

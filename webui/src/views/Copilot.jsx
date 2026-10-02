@@ -232,10 +232,12 @@ const CopilotView = () => {
 
   const getContextTokens = () => {
     let tokens = 0;
-    messages.forEach(m => {
+    const msgs = Array.isArray(messages) ? messages : [];
+    const recalls = Array.isArray(recallSessions) ? recallSessions : [];
+    msgs.forEach(m => {
       tokens += m.content.length;
     });
-    recallSessions.forEach(sid => {
+    recalls.forEach(sid => {
       tokens += 200;
     });
     return tokens;
@@ -573,7 +575,7 @@ const CopilotView = () => {
                       className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm font-mono outline-none focus:ring-2 focus:ring-violet-500" />
                   </div>
 
-                  {allModels[activeProvider.id] !== undefined && allModels[activeProvider.id].length > 0 && (
+                  {allModels[activeProvider?.id] && Array.isArray(allModels[activeProvider.id]) && allModels[activeProvider.id].length > 0 && (
                     <div>
                       <label className="block text-xs font-medium text-gray-500 mb-1">可用模型（点击选中）</label>
                       <div className="max-h-32 overflow-y-auto space-y-1">

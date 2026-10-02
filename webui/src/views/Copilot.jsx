@@ -369,27 +369,36 @@ const CopilotView = () => {
                     </div>
                   </div>
 
-                  {/* Model 选择 */}
+                  {/* Model 输入 */}
                   <div>
                     <label className="block text-xs font-medium text-gray-500 mb-1">Model</label>
-                    <select
-                      value={activeModel}
+                    <input type="text" value={activeModel}
                       onChange={e => setActiveModel(e.target.value)}
-                      className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm outline-none focus:ring-2 focus:ring-violet-500 bg-white"
-                    >
-                      {allModels[activeProvider.id] !== undefined ? (
-                        allModels[activeProvider.id].length > 0
-                          ? allModels[activeProvider.id].map(m => <option key={m} value={m}>{m}</option>)
-                          : <option value="">无可用模型</option>
-                      ) : (
-                        <option value="">加载中...</option>
-                      )}
-                    </select>
-                    {allModels[activeProvider.id] === undefined && !fetching && activeProvider.api_base && (
-                      <button onClick={() => { setFetching(true); loadModels(activeProvider).finally(() => setFetching(false)); }}
-                        className="mt-1 text-xs text-violet-600 hover:underline">重新加载</button>
-                    )}
+                      placeholder="如：gpt-4o, claude-3-5-sonnet..."
+                      className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm font-mono outline-none focus:ring-2 focus:ring-violet-500" />
                   </div>
+
+                  {/* 从 API 获取的模型 */}
+                  {allModels[activeProvider.id] !== undefined && allModels[activeProvider.id].length > 0 && (
+                    <div>
+                      <label className="block text-xs font-medium text-gray-500 mb-1">可用模型（点击选中）</label>
+                      <div className="max-h-32 overflow-y-auto space-y-1">
+                        {allModels[activeProvider.id].map(m => (
+                          <button key={m} onClick={() => setActiveModel(m)}
+                            className={`w-full text-left px-3 py-1.5 rounded-lg text-xs font-mono transition-colors ${activeModel === m ? 'bg-violet-100 text-violet-700' : 'hover:bg-gray-50 text-gray-600'}`}>
+                            {m}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* 加载/重试 */}
+                  {allModels[activeProvider.id] === undefined && !fetching && activeProvider.api_base && (
+                    <button onClick={() => { setFetching(true); loadModels(activeProvider).finally(() => setFetching(false)); }}
+                      className="text-xs text-violet-600 hover:underline">加载模型列表</button>
+                  )}
+                  {fetching && <p className="text-xs text-gray-400">加载中...</p>}
                 </>
               )}
             </div>

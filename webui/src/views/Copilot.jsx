@@ -36,6 +36,7 @@ const CopilotView = () => {
   const [newIcon, setNewIcon] = useState('');
   const [newBase, setNewBase] = useState('');
   const [savingNew, setSavingNew] = useState(false);
+  const [toolCalls, setToolCalls] = useState([]);
 
   // 跨会话回忆：选中哪些其他会话作为上下文
   const [recallSessions, setRecallSessions] = useState([]);
@@ -233,10 +234,28 @@ const CopilotView = () => {
         model: activeModel,
         messages: history.map(m => ({ role: m.role, content: m.content })),
         recall_sessions: recallSessions,
+        tools: [{
+          type: "function",
+          function: {
+            name: "bash",
+            description: "执行 Linux shell 命令",
+            parameters: {
+              type: "object",
+              properties: {
+                command: { type: "string", description: "要执行的命令" }
+              },
+              required: ["command"]
+            }
+          }
+        }],
+        tool_choice: "auto"
       });
       const rawReply = res.data.reply || '（无回复）';
       const reply = typeof rawReply === 'string' ? rawReply.replace(/[<|][a-z_|]+[>|]|\n/g, ' ').trim() : rawReply;
       setMessages(prev => [...prev, { role: 'assistant', content: reply }]);
+      if (res.data.tool_calls) {
+        setToolCalls(prev => [...prev, ...res.data.tool_calls]);
+      }
       if (res.data.model) {
         setActiveModel(res.data.model);
         setSessions(prev => prev.map(s => s.id === activeSessionId ? { ...s, model: res.data.model } : s));
@@ -333,6 +352,18 @@ const CopilotView = () => {
               </div>
             </div>
           ))}
+          {toolCalls.length > 0 && (
+            <div className="px-4 py-2 bg-blue-50 border border-blue-200 rounded-lg">
+              <div className="text-xs font-medium text-blue-700 mb-1">工具调用</div>
+              <div className="space-y-1">
+                {toolCalls.slice(-3).map((tc, i) => (
+                  <div key={i} className="text-xs font-mono text-blue-600">
+                    ▶ {tc.command || tc.name || JSON.stringify(tc)}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
           {loading && (
             <div className="flex gap-3">
               <div className="w-7 h-7 rounded-full bg-violet-500 text-white flex items-center justify-center shrink-0"><Bot size={14} /></div>

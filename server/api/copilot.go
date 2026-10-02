@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os/exec"
 	"strings"
 	"time"
 
@@ -312,11 +313,13 @@ func CopilotSaveHistory(c *gin.Context) {
 // ============================================================
 
 type CopilotChatRequest struct {
-	SessionID    int64   `json:"session_id"`
-	ProviderID   int64   `json:"provider_id"`
-	Model        string  `json:"model"`
-	Messages     []gin.H `json:"messages"`
-	MaxTokens    int     `json:"max_tokens"`
+	SessionID    int64    `json:"session_id"`
+	ProviderID   int64    `json:"provider_id"`
+	Model        string   `json:"model"`
+	Messages     []gin.H  `json:"messages"`
+	MaxTokens    int      `json:"max_tokens"`
+	Tools        []gin.H  `json:"tools"`
+	ToolChoice   string   `json:"tool_choice"`
 }
 
 func CopilotChat(c *gin.Context) {
@@ -405,11 +408,18 @@ func CopilotChat(c *gin.Context) {
 	// 循环调用直到获得纯文本回复（处理 tool calling）
 	maxTurns := 5
 	for turn := 0; turn < maxTurns; turn++ {
-		body, _ := json.Marshal(gin.H{
+		reqBody := gin.H{
 			"model":      model,
 			"messages":   fullMsgs,
 			"max_tokens": req.MaxTokens,
-		})
+		}
+		if len(req.Tools) > 0 {
+			reqBody["tools"] = req.Tools
+		}
+		if req.ToolChoice != "" {
+			reqBody["tool_choice"] = req.ToolChoice
+		}
+		body, _ := json.Marshal(reqBody)
 		reqURL := strings.TrimRight(apiBase, "/") + "/chat/completions"
 		httpReq, _ := http.NewRequest("POST", reqURL, strings.NewReader(string(body)))
 		httpReq.Header.Set("Content-Type", "application/json")
@@ -452,7 +462,7 @@ func CopilotChat(c *gin.Context) {
 
 		choice := result.Choices[0]
 
-		// 如果有 tool_calls，追加到 history 并继续调用
+		// 如果有 tool_calls，执行工具并继续调用
 		if len(choice.Message.ToolCalls) > 0 {
 			fullMsgs = append(fullMsgs, gin.H{
 				"role":       "assistant",
@@ -460,10 +470,23 @@ func CopilotChat(c *gin.Context) {
 				"tool_calls": choice.Message.ToolCalls,
 			})
 			for _, tc := range choice.Message.ToolCalls {
+				output := ""
+				if tc.Function.Name == "bash" {
+					// 执行 shell 命令
+					cmd := exec.Command("bash", "-c", tc.Function.Arguments)
+					out, err := cmd.CombinedOutput()
+					if err != nil {
+						output = fmt.Sprintf("命令执行失败: %v\n输出: %s", err, string(out))
+					} else {
+						output = string(out)
+					}
+				} else {
+					output = fmt.Sprintf("未知工具: %s", tc.Function.Name)
+				}
 				fullMsgs = append(fullMsgs, gin.H{
 					"role":         "tool",
 					"tool_call_id": tc.ID,
-					"content":      fmt.Sprintf("工具 %s 已执行，请继续回答", tc.Function.Name),
+					"content":      output,
 				})
 			}
 			continue

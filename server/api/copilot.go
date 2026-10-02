@@ -62,11 +62,18 @@ func CopilotCreateSession(c *gin.Context) {
 		database.DB.QueryRow("SELECT COUNT(*) FROM copilot_sessions").Scan(&cnt)
 		name = fmt.Sprintf("对话 %d", cnt+1)
 	}
-	// 继承最后一个会话的配置
+	// 继承最后一个会话的配置，如果没有则从 Provider 获取默认值
 	var lastBase, lastModel string
 	database.DB.QueryRow("SELECT api_base, model FROM copilot_sessions ORDER BY id DESC LIMIT 1").Scan(&lastBase, &lastModel)
 	if lastBase == "" {
-		lastBase = "https://api.openai.com/v1"
+		// 从第一个 Provider 获取默认 api_base
+		var defaultBase string
+		database.DB.QueryRow("SELECT api_base FROM copilot_providers LIMIT 1").Scan(&defaultBase)
+		if defaultBase != "" {
+			lastBase = defaultBase
+		} else {
+			lastBase = "https://api.openai.com/v1"
+		}
 	}
 	if lastModel == "" {
 		lastModel = "gpt-4o"

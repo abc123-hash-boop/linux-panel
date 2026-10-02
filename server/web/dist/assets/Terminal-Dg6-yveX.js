@@ -1,4 +1,4 @@
-import{r as Ye,j as X}from"./index-ByXzowhW.js";/**
+import{r as Ye,j as X}from"./index-DJekx0W2.js";/**
  * Copyright (c) 2014-2024 The xterm.js authors. All rights reserved.
  * @license MIT
  *

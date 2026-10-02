@@ -425,7 +425,12 @@ func CopilotChat(c *gin.Context) {
 		if req.ToolChoice != "" {
 			reqBody["tool_choice"] = req.ToolChoice
 		}
-		body, _ := json.Marshal(reqBody)
+		body, err := json.Marshal(reqBody)
+		if err != nil {
+			c.JSON(500, gin.H{"error": "marshal failed"})
+			return
+		}
+		fmt.Printf("[DEBUG] Request body: %s\n", string(body))
 		reqURL := strings.TrimRight(apiBase, "/") + "/chat/completions"
 		httpReq, _ := http.NewRequest("POST", reqURL, strings.NewReader(string(body)))
 		httpReq.Header.Set("Content-Type", "application/json")

@@ -411,12 +411,13 @@ func CopilotChat(c *gin.Context) {
 		return
 	}
 
-	// 解析回复
+	// 解析回复（处理 function calling 响应）
 	var result struct {
 		Choices []struct {
 			Message struct {
-				Role    string `json:"role"`
-				Content string `json:"content"`
+				Role          string           `json:"role"`
+				Content       string           `json:"content"`
+				ToolCalls     []gin.H          `json:"tool_calls"`
 			} `json:"message"`
 		} `json:"choices"`
 	}
@@ -427,7 +428,32 @@ func CopilotChat(c *gin.Context) {
 		return
 	}
 
-	reply := result.Choices[0].Message.Content
+	choice := result.Choices[0]
+	reply := choice.Message.Content
+	// 如果有 tool_calls，提取文字内容（过滤掉工具调用标签）
+	if len(choice.Message.ToolCalls) > 0 && reply == "" {
+		// 有些模型用 XML 标签包裹 tool calls，尝试提取纯文本
+		for _, tc := range choice.Message.ToolCalls {
+			if fn, ok := tc["function"].(gin.H); ok {
+				if name, ok := fn["name"].(string); ok {
+					reply += fmt.Sprintf("[调用工具: %s]", name)
+				}
+			}
+		}
+	}
+	// 移除可能的 XML/特殊标记
+	if reply != "" {
+		// 清理 tool call 标记
+		replaceStrs := []struct{ old, new string }{
+			{"<|assistant|>", ""}, {"<|tool_call|>", ""}, {"<|tool_calls|>", ""},
+			{"<|end|>", ""}, {"\n", " "},
+		}
+		cleaned := reply
+		for _, r := range replaceStrs {
+			cleaned = strings.ReplaceAll(cleaned, r.old, r.new)
+		}
+		reply = strings.TrimSpace(cleaned)
+	}
 
 	// 保存对话到数据库
 	tx, _ := database.DB.Begin()

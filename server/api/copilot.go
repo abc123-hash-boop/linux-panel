@@ -26,12 +26,13 @@ type Session struct {
 	ID             int64    `json:"id"`
 	Name           string   `json:"name"`
 	Model          string   `json:"model"`
+	APIKey         string   `json:"api_key"`
 	APIBase        string   `json:"api_base"`
-	RecallSessions string   `json:"recall_sessions"` // JSON array of session IDs
+	RecallSessions string   `json:"recall_sessions"`
 }
 
 func CopilotListSessions(c *gin.Context) {
-	rows, err := database.DB.Query("SELECT id, name, model, api_base, COALESCE(recall_sessions,'') FROM copilot_sessions ORDER BY id")
+	rows, err := database.DB.Query("SELECT id, name, model, api_key, api_base, COALESCE(recall_sessions,'') FROM copilot_sessions ORDER BY id")
 	if err != nil {
 		c.JSON(500, gin.H{"error": "database error"})
 		return
@@ -41,7 +42,7 @@ func CopilotListSessions(c *gin.Context) {
 	var sessions []Session
 	for rows.Next() {
 		var s Session
-		rows.Scan(&s.ID, &s.Name, &s.Model, &s.APIBase, &s.RecallSessions)
+		rows.Scan(&s.ID, &s.Name, &s.Model, &s.APIKey, &s.APIBase, &s.RecallSessions)
 		sessions = append(sessions, s)
 	}
 	c.JSON(200, sessions)
@@ -70,8 +71,12 @@ func CopilotCreateSession(c *gin.Context) {
 	if lastModel == "" {
 		lastModel = "gpt-4o"
 	}
-	id, _ := database.DB.Exec("INSERT INTO copilot_sessions(name, model, api_base, recall_sessions) VALUES(?,?,?,?)",
-		name, lastModel, lastBase, "{}")
+	id, err := database.DB.Exec("INSERT INTO copilot_sessions(name, model, api_key, api_base, recall_sessions) VALUES(?,?,?,?,?)",
+		name, lastModel, "", lastBase, "{}")
+	if err != nil {
+		c.JSON(500, gin.H{"error": "insert failed"})
+		return
+	}
 	res, _ := id.LastInsertId()
 	c.JSON(200, gin.H{"id": res, "name": name, "model": lastModel, "api_base": lastBase, "recall_sessions": "{}"})
 }
@@ -153,8 +158,8 @@ func CopilotCreateProvider(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "bad request"})
 		return
 	}
-	res, err := database.DB.Exec("INSERT INTO copilot_providers(name, icon, api_base) VALUES(?,?,?)",
-		data.Name, data.Icon, data.APIBase)
+	res, err := database.DB.Exec("INSERT INTO copilot_providers(name, icon, api_base, api_key) VALUES(?,?,?,?)",
+		data.Name, data.Icon, data.APIBase, "")
 	if err != nil {
 		c.JSON(500, gin.H{"error": "insert failed"})
 		return
@@ -174,14 +179,15 @@ func CopilotUpdateProvider(c *gin.Context) {
 		Name    string   `json:"name"`
 		Icon    string   `json:"icon"`
 		APIBase string   `json:"api_base"`
+		APIKey  string   `json:"api_key"`
 		Models  []string `json:"models"`
 	}
 	if err := c.ShouldBindJSON(&data); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "bad request"})
 		return
 	}
-	database.DB.Exec("UPDATE copilot_providers SET name=?, icon=?, api_base=? WHERE id=?",
-		data.Name, data.Icon, data.APIBase, id)
+	database.DB.Exec("UPDATE copilot_providers SET name=?, icon=?, api_base=?, api_key=? WHERE id=?",
+		data.Name, data.Icon, data.APIBase, data.APIKey, id)
 	// 替换 models
 	database.DB.Exec("DELETE FROM copilot_models WHERE provider_id=?", id)
 	for _, mname := range data.Models {
@@ -397,8 +403,8 @@ func CopilotChat(c *gin.Context) {
 			c.JSON(502, gin.H{"error": fmt.Sprintf("请求失败: %s", err.Error())})
 			return
 		}
-		defer resp.Body.Close()
 		respBody, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
 		if resp.StatusCode != 200 {
 			c.JSON(resp.StatusCode, gin.H{"error": string(respBody)})
 			return

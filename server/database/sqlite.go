@@ -81,7 +81,9 @@ func createTable() {
 
 		icon TEXT DEFAULT '',
 
-		api_base TEXT NOT NULL
+		api_base TEXT NOT NULL,
+
+		api_key TEXT DEFAULT ''
 
 	);
 

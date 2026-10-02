@@ -3,7 +3,8 @@ import {
   LayoutDashboard, 
   Container, 
   Files, 
-  Terminal, 
+  Terminal,
+  Bot,
   Settings, 
   LogOut, 
   Menu
@@ -86,6 +87,12 @@ const Sidebar = ({ isOpen, setIsOpen }) => {
               icon={Terminal} 
               label="Terminal" 
               active={location.pathname === '/terminal'} 
+            />
+            <NavItem 
+              to="/copilot" 
+              icon={Bot} 
+              label="Copilot" 
+              active={location.pathname === '/copilot'} 
             />
             <NavItem 
               to="/settings" 

@@ -8,6 +8,7 @@ const Dashboard = lazy(() => import('./views/Dashboard'));
 const Docker = lazy(() => import('./views/Docker'));
 const Files = lazy(() => import('./views/Files'));
 const Terminal = lazy(() => import('./views/Terminal'));
+const Copilot = lazy(() => import('./views/Copilot'));
 const Settings = lazy(() => import('./views/Settings'));
 const Login = lazy(() => import('./views/Login'));
 
@@ -54,6 +55,7 @@ function App() {
           <Route path="docker" element={<Docker />} />
           <Route path="files" element={<Files />} />
           <Route path="terminal" element={<Terminal />} />
+          <Route path="copilot" element={<Copilot />} />
           <Route path="settings" element={<Settings />} />
           <Route path="*" element={<NotFound />} />
         </Route>

@@ -43,11 +43,9 @@ const CopilotView = () => {
     try {
       await apiClient.post('/copilot/providers', { name: newName.trim(), icon: newIcon.trim(), api_base: newBase.trim() });
       await loadProviders();
-      // loadProviders 后 providers state 已更新，选最后一个
-      setTimeout(() => {
-        const last = providers[providers.length - 1];
-        if (last) { setActiveProvider(last); setAllModels({}); }
-      }, 0);
+      // 用 ref 获取最新 providers
+      const last = providersRef.current[providersRef.current.length - 1];
+      if (last) { setActiveProvider(last); setAllModels({}); }
     } catch (e) { console.error(e); } finally { setSavingNew(false); setShowAddForm(false); setNewName(''); setNewIcon(''); setNewBase(''); }
   };
 

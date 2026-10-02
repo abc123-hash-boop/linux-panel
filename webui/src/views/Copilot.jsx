@@ -71,7 +71,6 @@ const CopilotView = () => {
 
   const restoreSessionConfig = (session) => {
     if (!session) return;
-    // 从会话配置恢复 provider
     if (session.api_base) {
       const prov = providers.find(p => p.api_base === session.api_base);
       if (prov) {
@@ -94,12 +93,11 @@ const CopilotView = () => {
   const createSession = async () => {
     try {
       const res = await apiClient.post('/copilot/sessions', { name: '新对话' });
-      const newSession = { id: res.data.id, name: res.data.name, model: res.data.model, api_key: res.data.api_key, api_base: res.data.api_base };
+      const newSession = { id: res.data.id, name: res.data.name, model: res.data.model, api_key: res.data.api_key, api_base: res.data.api_base, recall_sessions: res.data.recall_sessions || '[]' };
       setSessions(prev => [...prev, newSession]);
       setActiveSessionId(res.data.id);
       setMessages([]);
-      setRecallSessions([]);
-      // 恢复新会话的配置（已继承自上一会话）
+      setRecallSessions(JSON.parse(newSession.recall_sessions || '[]'));
       setActiveProvider({ ...newSession, _preset: false });
       if (res.data.model) setActiveModel(res.data.model);
     } catch {}
@@ -191,6 +189,12 @@ const CopilotView = () => {
     setRecallSessions(prev => prev.includes(sid) ? prev.filter(x => x !== sid) : [...prev, sid]);
   };
 
+  const saveRecallConfig = async () => {
+    if (!activeSessionId) return;
+    await apiClient.put(`/copilot/session/${activeSessionId}`, { recall_sessions: JSON.stringify(recallSessions) });
+    setSessions(prev => prev.map(s => s.id === activeSessionId ? { ...s, recall_sessions: JSON.stringify(recallSessions) } : s));
+  };
+
   const getContextTokens = () => {
     // 估算 token 数：中文约 1 字 1 token，英文约 4 字符 1 token
     let tokens = 0;
@@ -220,40 +224,25 @@ const CopilotView = () => {
     setInput('');
     setLoading(true);
 
-    // 构建当前会话历史
     const history = [...messages.slice(-20), { role: 'user', content: text }];
 
-    // 加载 recall 会话的上下文
-    let recallContext = '';
-    if (recallSessions.length > 0) {
-      try {
-        const promises = recallSessions.map(sid =>
-          apiClient.get(`/copilot/recent/${sid}?limit=10`).then(r => r.data).catch(() => [])
-        );
-        const results = await Promise.all(promises);
-        results.flat().forEach(m => {
-          recallContext += `[来自其他会话] ${m.role === 'user' ? '用户' : '助手'}: ${m.content}\n`;
-        });
-      } catch {}
-    }
-
     try {
-      const res = await apiClient.post('/copilot/chat', {
+      await apiClient.post('/copilot/chat', {
         session_id: activeSessionId,
         api_base: activeProvider.api_base,
         api_key: activeProvider.api_key,
         model,
         messages: history.map(m => ({ role: m.role, content: m.content })),
-        recall_context: recallContext,
-        max_tokens: 2048,
+        recall_sessions: recallSessions,
       });
-      const reply = res.data.reply || '（无回复）';
-      setMessages(prev => [...prev, { role: 'assistant', content: reply }]);
+      // 重新加载当前会话消息
+      const res = await apiClient.get(`/copilot/history?session_id=${activeSessionId}`);
+      if (Array.isArray(res.data)) setMessages(res.data);
     } catch (err) {
       const msg = err?.response?.data?.error || err?.message || '请求失败';
       setError(msg);
       setMessages(prev => [...prev, { role: 'assistant', content: `⚠️ ${msg}` }]);
-    } finally { setLoading(false); };
+    } finally { setLoading(false); }
   };
 
   const handleKeyDown = (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); } };
@@ -284,12 +273,12 @@ const CopilotView = () => {
           {sessions.length === 0 && <div className="px-3 py-6 text-center text-xs text-gray-400">暂无会话</div>}
         </div>
 
-        {/* 跨会话回忆开关 */}
+        {/* 跨会话回忆入口 */}
         {sessions.length > 1 && (
           <div className="px-3 py-2 border-t border-gray-100">
             <button onClick={() => setSettingsOpen(true)} className="flex items-center gap-1.5 w-full text-xs text-gray-500 hover:text-violet-600 transition-colors">
               <ArrowLeftRight size={12} />
-              <span>跨会话回忆 ({recallSessions.length})</span>
+              <span>回忆 {(() => { const s = sessions.find(x => x.id === activeSessionId); return JSON.parse(s?.recall_sessions || '[]').length; })()}</span>
             </button>
           </div>
         )}
@@ -501,7 +490,7 @@ const CopilotView = () => {
                   {sessions.length > 1 && (
                     <div>
                       <label className="block text-xs font-medium text-gray-500 mb-2 flex items-center gap-1.5">
-                        <ArrowLeftRight size={12} />跨会话回忆（选择其他会话作为上下文）
+                        <ArrowLeftRight size={12} />跨会话回忆（初始化 prompt 注入）
                       </label>
                       <div className="max-h-32 overflow-y-auto space-y-1 border border-gray-200 rounded-lg p-2">
                         {sessions.filter(s => s.id !== activeSessionId).map(s => (
@@ -512,7 +501,11 @@ const CopilotView = () => {
                           </label>
                         ))}
                       </div>
-                      <p className="text-xs text-gray-400 mt-1">选中的会话最近 10 条消息将作为额外上下文发送给 AI</p>
+                      <button onClick={saveRecallConfig}
+                        className="mt-2 w-full py-1.5 text-xs bg-violet-600 text-white rounded-lg hover:bg-violet-700 transition-colors">
+                        保存回忆配置
+                      </button>
+                      <p className="text-xs text-gray-400 mt-1">选中的会话最近 10 条消息将作为初始 prompt 上下文</p>
                     </div>
                   )}
                 </>

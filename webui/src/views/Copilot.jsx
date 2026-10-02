@@ -42,10 +42,11 @@ const CopilotView = () => {
 
   // 自动命名会话
   const autoNameSession = async (sid, msg) => {
-    if (!msg || msg.length < 10) return;
+    if (!msg) return;
+    const name = msg.trim().slice(0, 30) || '新对话';
     try {
-      await apiClient.put(`/copilot/session/${sid}`, { name: msg.slice(0, 30) + (msg.length > 30 ? '...' : '') });
-      setSessions(prev => prev.map(s => s.id === sid ? { ...s, name: msg.slice(0, 30) + (msg.length > 30 ? '...' : '') } : s));
+      await apiClient.put(`/copilot/session/${sid}`, { name });
+      setSessions(prev => prev.map(s => s.id === sid ? { ...s, name } : s));
     } catch {}
   };
 
@@ -278,6 +279,10 @@ const CopilotView = () => {
         if (histRes.data.length === 2) {
           const firstUserMsg = histRes.data.find(m => m.role === 'user');
           if (firstUserMsg) autoNameSession(activeSessionId, firstUserMsg.content);
+        } else if (histRes.data.length === 1) {
+          // 刚发送第一条消息，立即命名
+          const lastMsg = histRes.data[histRes.data.length - 1];
+          if (lastMsg?.role === 'user') autoNameSession(activeSessionId, lastMsg.content);
         }
       }
     } catch (err) {

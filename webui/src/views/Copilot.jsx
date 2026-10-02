@@ -40,13 +40,26 @@ const CopilotView = () => {
   const [expandedSessions, setExpandedSessions] = useState({});
   const [expandedMessages, setExpandedMessages] = useState({});
 
-  // 自动命名会话
-  const autoNameSession = async (sid, msg) => {
-    if (!msg) return;
-    const name = msg.trim().slice(0, 30) || '新对话';
+  // AI 自动命名会话
+  const autoNameSession = async (sid, messages) => {
+    if (!sid || !messages || messages.length < 2) return;
     try {
-      await apiClient.put(`/copilot/session/${sid}`, { name });
-      setSessions(prev => prev.map(s => s.id === sid ? { ...s, name } : s));
+      const lastUserMsg = messages.filter(m => m.role === 'user').pop();
+      if (!lastUserMsg) return;
+      const res = await apiClient.post('/copilot/chat', {
+        session_id: sid,
+        api_key: activeProvider?.api_key || '',
+        api_base: activeProvider?.api_base || '',
+        model: activeModel || 'gpt-4o',
+        messages: [{ role: 'user', content: `请用中文简洁概括这个对话的主题，最多10个字，直接返回主题文字，不要加任何标点或说明。对话内容：${lastUserMsg.content}` }],
+        tools: [],
+        tool_choice: "none"
+      });
+      const name = (res.data.reply || '新对话').trim().slice(0, 20);
+      if (name && name !== '新对话') {
+        await apiClient.put(`/copilot/session/${sid}`, { name });
+        setSessions(prev => prev.map(s => s.id === sid ? { ...s, name } : s));
+      }
     } catch {}
   };
 
@@ -275,14 +288,9 @@ const CopilotView = () => {
       const histRes = await apiClient.get(`/copilot/history?session_id=${activeSessionId}`);
       if (Array.isArray(histRes.data)) {
         setMessages(histRes.data);
-        // 首次对话时自动命名
-        if (histRes.data.length === 2) {
-          const firstUserMsg = histRes.data.find(m => m.role === 'user');
-          if (firstUserMsg) autoNameSession(activeSessionId, firstUserMsg.content);
-        } else if (histRes.data.length === 1) {
-          // 刚发送第一条消息，立即命名
-          const lastMsg = histRes.data[histRes.data.length - 1];
-          if (lastMsg?.role === 'user') autoNameSession(activeSessionId, lastMsg.content);
+        // 首次对话后 AI 自动命名
+        if (histRes.data.length >= 2 && (!sessions.find(s => s.id === activeSessionId)?.name || sessions.find(s => s.id === activeSessionId)?.name === '新对话')) {
+          autoNameSession(activeSessionId, histRes.data);
         }
       }
     } catch (err) {

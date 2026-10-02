@@ -377,15 +377,17 @@ const CopilotView = () => {
                       onChange={e => setActiveModel(e.target.value)}
                       className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm outline-none focus:ring-2 focus:ring-violet-500 bg-white"
                     >
-                      {allModels[activeProvider.id]?.length > 0 ? (
-                        allModels[activeProvider.id].map(m => <option key={m} value={m}>{m}</option>)
+                      {allModels[activeProvider.id] !== undefined ? (
+                        allModels[activeProvider.id].length > 0
+                          ? allModels[activeProvider.id].map(m => <option key={m} value={m}>{m}</option>)
+                          : <option value="">无可用模型</option>
                       ) : (
                         <option value="">加载中...</option>
                       )}
                     </select>
-                    {allModels[activeProvider.id]?.length === 0 && !fetching && (
+                    {allModels[activeProvider.id] === undefined && !fetching && activeProvider.api_base && (
                       <button onClick={() => { setFetching(true); loadModels(activeProvider).finally(() => setFetching(false)); }}
-                        className="mt-1 text-xs text-violet-600 hover:underline">重新加载模型列表</button>
+                        className="mt-1 text-xs text-violet-600 hover:underline">重新加载</button>
                     )}
                   </div>
                 </>

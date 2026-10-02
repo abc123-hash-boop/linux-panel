@@ -227,17 +227,22 @@ const CopilotView = () => {
     const history = [...messages.slice(-20), { role: 'user', content: text }];
 
     try {
-      await apiClient.post('/copilot/chat', {
+      const res = await apiClient.post('/copilot/chat', {
         session_id: activeSessionId,
         api_base: activeProvider.api_base,
         api_key: activeProvider.api_key,
-        model,
+        model: activeModel,
         messages: history.map(m => ({ role: m.role, content: m.content })),
         recall_sessions: recallSessions,
       });
-      // 重新加载当前会话消息
-      const res = await apiClient.get(`/copilot/history?session_id=${activeSessionId}`);
-      if (Array.isArray(res.data)) setMessages(res.data);
+      const reply = res.data.reply || '（无回复）';
+      setMessages(prev => [...prev, { role: 'assistant', content: reply }]);
+      if (res.data.model) {
+        setActiveModel(res.data.model);
+        setSessions(prev => prev.map(s => s.id === activeSessionId ? { ...s, model: res.data.model } : s));
+      }
+      const histRes = await apiClient.get(`/copilot/history?session_id=${activeSessionId}`);
+      if (Array.isArray(histRes.data)) setMessages(histRes.data);
     } catch (err) {
       const msg = err?.response?.data?.error || err?.message || '请求失败';
       setError(msg);
@@ -459,7 +464,16 @@ const CopilotView = () => {
                   <div>
                     <label className="block text-xs font-medium text-gray-500 mb-1">Model</label>
                     <input type="text" value={activeModel}
-                      onChange={e => setActiveModel(e.target.value)}
+                      onChange={e => {
+                        setActiveModel(e.target.value);
+                        if (activeSessionId) {
+                          apiClient.put(`/copilot/session/${activeSessionId}`, { model: e.target.value })
+                            .then(r => {
+                              setSessions(prev => prev.map(s => s.id === activeSessionId ? { ...s, model: e.target.value } : s));
+                            })
+                            .catch(() => {});
+                        }
+                      }}
                       placeholder="如：gpt-4o, claude-3-5-sonnet..."
                       className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm font-mono outline-none focus:ring-2 focus:ring-violet-500" />
                   </div>

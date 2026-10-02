@@ -436,7 +436,7 @@ func CopilotChat(c *gin.Context) {
 	tx.Exec("UPDATE copilot_sessions SET model=? WHERE id=?", model, req.SessionID)
 	tx.Commit()
 
-	c.JSON(200, gin.H{"reply": reply})
+	c.JSON(200, gin.H{"reply": reply, "model": req.Model})
 }
 
 // 获取其他会话最近消息（跨会话回忆）

@@ -412,7 +412,7 @@ func CopilotChat(c *gin.Context) {
 	client := &http.Client{Timeout: 120 * time.Second}
 
 	// 循环调用直到获得纯文本回复（处理 tool calling）
-	maxTurns := 5
+	maxTurns := 20
 	for turn := 0; turn < maxTurns; turn++ {
 		reqBody := gin.H{
 			"model":      model,

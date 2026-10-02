@@ -37,6 +37,17 @@ const CopilotView = () => {
   const [newBase, setNewBase] = useState('');
   const [savingNew, setSavingNew] = useState(false);
   const [toolCalls, setToolCalls] = useState([]);
+  const [expandedSessions, setExpandedSessions] = useState({});
+  const [expandedMessages, setExpandedMessages] = useState({});
+
+  // 自动命名会话
+  const autoNameSession = async (sid, msg) => {
+    if (!msg || msg.length < 10) return;
+    try {
+      await apiClient.put(`/copilot/session/${sid}`, { name: msg.slice(0, 30) + (msg.length > 30 ? '...' : '') });
+      setSessions(prev => prev.map(s => s.id === sid ? { ...s, name: msg.slice(0, 30) + (msg.length > 30 ? '...' : '') } : s));
+    } catch {}
+  };
 
   // 跨会话回忆：选中哪些其他会话作为上下文
   const [recallSessions, setRecallSessions] = useState([]);
@@ -261,7 +272,14 @@ const CopilotView = () => {
         setSessions(prev => prev.map(s => s.id === activeSessionId ? { ...s, model: res.data.model } : s));
       }
       const histRes = await apiClient.get(`/copilot/history?session_id=${activeSessionId}`);
-      if (Array.isArray(histRes.data)) setMessages(histRes.data);
+      if (Array.isArray(histRes.data)) {
+        setMessages(histRes.data);
+        // 首次对话时自动命名
+        if (histRes.data.length === 2) {
+          const firstUserMsg = histRes.data.find(m => m.role === 'user');
+          if (firstUserMsg) autoNameSession(activeSessionId, firstUserMsg.content);
+        }
+      }
     } catch (err) {
       const msg = err?.response?.data?.error || err?.message || '请求失败';
       setError(msg);
@@ -284,13 +302,43 @@ const CopilotView = () => {
         </div>
         <div className="flex-1 overflow-y-auto">
           {sessions.map(s => (
-            <div key={s.id} onClick={() => { setActiveSessionId(s.id); setRecallSessions([]); }}
-              className={`group flex items-center gap-1.5 px-3 py-2 cursor-pointer hover:bg-gray-50 transition-colors ${activeSessionId === s.id ? 'bg-violet-50 border-r-2 border-violet-500' : ''}`}>
-              <MessageSquare size={13} className="text-gray-400 shrink-0" />
-              <span className="flex-1 text-xs text-gray-700 truncate">{s.name}</span>
-              {activeSessionId === s.id && (
-                <button onClick={e => { e.stopPropagation(); deleteSession(s.id); }}
-                  className="p-0.5 text-gray-400 hover:text-red-500 rounded transition-colors shrink-0"><Trash2 size={11} /></button>
+            <div key={s.id} className="border-b border-gray-50 last:border-0">
+              <div onClick={() => { setActiveSessionId(s.id); setRecallSessions(JSON.parse(s.recall_sessions || '[]')); }}
+                className={`group flex items-center gap-2 px-3 py-2.5 cursor-pointer hover:bg-gray-50 transition-colors ${activeSessionId === s.id ? 'bg-violet-50 border-r-2 border-violet-500' : ''}`}>
+                <MessageSquare size={14} className="text-gray-400 shrink-0" />
+                <span className="flex-1 text-xs text-gray-700 truncate">{s.name || '未命名'}</span>
+                {activeSessionId === s.id && (
+                  <button onClick={e => { e.stopPropagation(); deleteSession(s.id); }}
+                    className="p-0.5 text-gray-400 hover:text-red-500 rounded transition-colors shrink-0"><Trash2 size={11} /></button>
+                )}
+                <button onClick={e => {
+                  e.stopPropagation();
+                  const wasExpanded = expandedSessions[s.id];
+                  setExpandedSessions(prev => ({ ...prev, [s.id]: !wasExpanded }));
+                  // 加载消息历史
+                  if (!wasExpanded && !expandedMessages[s.id]) {
+                    apiClient.get(`/copilot/history?session_id=${s.id}`).then(res => {
+                      if (Array.isArray(res.data)) setExpandedMessages(prev => ({ ...prev, [s.id]: res.data }));
+                    }).catch(() => {});
+                  }
+                }}
+                  className="p-0.5 text-gray-400 hover:text-violet-600 rounded transition-colors shrink-0">
+                  <svg className={`w-3 h-3 transition-transform ${expandedSessions[s.id] ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                  </svg>
+                </button>
+              </div>
+              {expandedSessions[s.id] && (
+                <div className="px-3 pb-2 max-h-40 overflow-y-auto">
+                  {(() => {
+                    const msgs = expandedMessages[s.id] || [];
+                    return msgs.slice(-5).map((m, i) => (
+                      <div key={i} className={`text-xs mb-1 ${m.role === 'user' ? 'text-blue-600' : 'text-gray-600'}`}>
+                        <span className="font-medium">{m.role === 'user' ? '你' : 'AI'}:</span> {m.content.slice(0, 60)}{m.content.length > 60 ? '...' : ''}
+                      </div>
+                    ));
+                  })()}
+                </div>
               )}
             </div>
           ))}

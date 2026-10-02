@@ -26,13 +26,12 @@ type Session struct {
 	ID             int64    `json:"id"`
 	Name           string   `json:"name"`
 	Model          string   `json:"model"`
-	APIKey         string   `json:"api_key"`
 	APIBase        string   `json:"api_base"`
 	RecallSessions string   `json:"recall_sessions"` // JSON array of session IDs
 }
 
 func CopilotListSessions(c *gin.Context) {
-	rows, err := database.DB.Query("SELECT id, name, model, api_key, api_base, COALESCE(recall_sessions,'') FROM copilot_sessions ORDER BY id")
+	rows, err := database.DB.Query("SELECT id, name, model, api_base, COALESCE(recall_sessions,'') FROM copilot_sessions ORDER BY id")
 	if err != nil {
 		c.JSON(500, gin.H{"error": "database error"})
 		return
@@ -42,7 +41,7 @@ func CopilotListSessions(c *gin.Context) {
 	var sessions []Session
 	for rows.Next() {
 		var s Session
-		rows.Scan(&s.ID, &s.Name, &s.Model, &s.APIKey, &s.APIBase, &s.RecallSessions)
+		rows.Scan(&s.ID, &s.Name, &s.Model, &s.APIBase, &s.RecallSessions)
 		sessions = append(sessions, s)
 	}
 	c.JSON(200, sessions)
@@ -63,21 +62,18 @@ func CopilotCreateSession(c *gin.Context) {
 		name = fmt.Sprintf("对话 %d", cnt+1)
 	}
 	// 继承最后一个会话的配置
-	var lastKey, lastBase, lastModel string
-	database.DB.QueryRow("SELECT api_key, api_base, model FROM copilot_sessions ORDER BY id DESC LIMIT 1").Scan(&lastKey, &lastBase, &lastModel)
-	if lastKey == "" {
-		lastKey = ""
-	}
+	var lastBase, lastModel string
+	database.DB.QueryRow("SELECT api_base, model FROM copilot_sessions ORDER BY id DESC LIMIT 1").Scan(&lastBase, &lastModel)
 	if lastBase == "" {
 		lastBase = "https://api.openai.com/v1"
 	}
 	if lastModel == "" {
 		lastModel = "gpt-4o"
 	}
-	id, _ := database.DB.Exec("INSERT INTO copilot_sessions(name, model, api_key, api_base, recall_sessions) VALUES(?,?,?,?,?)",
-		name, lastModel, lastKey, lastBase, "{}")
+	id, _ := database.DB.Exec("INSERT INTO copilot_sessions(name, model, api_base, recall_sessions) VALUES(?,?,?,?)",
+		name, lastModel, lastBase, "{}")
 	res, _ := id.LastInsertId()
-	c.JSON(200, gin.H{"id": res, "name": name, "model": lastModel, "api_key": lastKey, "api_base": lastBase, "recall_sessions": "{}"})
+	c.JSON(200, gin.H{"id": res, "name": name, "model": lastModel, "api_base": lastBase, "recall_sessions": "{}"})
 }
 
 func CopilotUpdateSession(c *gin.Context) {
@@ -88,8 +84,8 @@ func CopilotUpdateSession(c *gin.Context) {
 		return
 	}
 	_, err := database.DB.Exec(
-		"UPDATE copilot_sessions SET name=?, model=?, api_key=?, api_base=?, recall_sessions=? WHERE id=?",
-		data.Name, data.Model, data.APIKey, data.APIBase, data.RecallSessions, id)
+		"UPDATE copilot_sessions SET name=?, model=?, api_base=?, recall_sessions=? WHERE id=?",
+		data.Name, data.Model, data.APIBase, data.RecallSessions, id)
 	if err != nil {
 		c.JSON(500, gin.H{"error": "update failed"})
 		return
@@ -303,12 +299,11 @@ func CopilotSaveHistory(c *gin.Context) {
 // ============================================================
 
 type CopilotChatRequest struct {
-	SessionID int64   `json:"session_id"`
-	APIBase   string  `json:"api_base"`
-	APIKey    string  `json:"api_key"`
-	Model     string  `json:"model"`
-	Messages  []gin.H `json:"messages"`
-	MaxTokens int     `json:"max_tokens"`
+	SessionID    int64   `json:"session_id"`
+	ProviderID   int64   `json:"provider_id"`
+	Model        string  `json:"model"`
+	Messages     []gin.H `json:"messages"`
+	MaxTokens    int     `json:"max_tokens"`
 }
 
 func CopilotChat(c *gin.Context) {
@@ -322,26 +317,24 @@ func CopilotChat(c *gin.Context) {
 	}
 
 	// 从会话读取配置
-	var sessAPIKey, sessAPIBase, sessModel, recallSessionsStr string
-	err := database.DB.QueryRow("SELECT api_key, api_base, model, COALESCE(recall_sessions,'') FROM copilot_sessions WHERE id=?", req.SessionID).Scan(&sessAPIKey, &sessAPIBase, &sessModel, &recallSessionsStr)
+	var sessAPIBase, sessModel, recallSessionsStr string
+	err := database.DB.QueryRow("SELECT api_base, model, COALESCE(recall_sessions,'') FROM copilot_sessions WHERE id=?", req.SessionID).Scan(&sessAPIBase, &sessModel, &recallSessionsStr)
 	if err != nil {
 		c.JSON(404, gin.H{"error": "session not found"})
 		return
 	}
-	apiKey := req.APIKey
-	if apiKey == "" {
-		apiKey = sessAPIKey
-	}
-	apiBase := req.APIBase
-	if apiBase == "" {
-		apiBase = sessAPIBase
-	}
-	model := req.Model
-	if model == "" {
-		model = sessModel
+	apiBase := sessAPIBase
+	model := sessModel
+
+	// api_key 从 provider 读取（全局）
+	apiKey := ""
+	var provID int64
+	database.DB.QueryRow("SELECT id FROM copilot_providers WHERE api_base=?", apiBase).Scan(&provID)
+	if provID > 0 {
+		database.DB.QueryRow("SELECT api_key FROM copilot_providers WHERE id=?", provID).Scan(&apiKey)
 	}
 	if apiKey == "" || apiBase == "" || model == "" {
-		c.JSON(400, gin.H{"error": "missing api_key or api_base or model"})
+		c.JSON(400, gin.H{"error": "missing config"})
 		return
 	}
 
@@ -359,7 +352,6 @@ func CopilotChat(c *gin.Context) {
 				msgs = append(msgs, gin.H{"role": role, "content": content})
 			}
 			rows.Close()
-			// 反转
 			for i, j := 0, len(msgs)-1; i < j; i, j = i+1, j-1 {
 				msgs[i], msgs[j] = msgs[j], msgs[i]
 			}
@@ -385,87 +377,98 @@ func CopilotChat(c *gin.Context) {
 		fullMsgs = append(fullMsgs, m)
 	}
 
-	// 调用 LLM API
-	body, _ := json.Marshal(gin.H{
-		"model":      model,
-		"messages":   fullMsgs,
-		"max_tokens": req.MaxTokens,
-	})
-
-	reqURL := strings.TrimRight(apiBase, "/") + "/chat/completions"
-	httpReq, _ := http.NewRequest("POST", reqURL, strings.NewReader(string(body)))
-	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Authorization", "Bearer "+apiKey)
-
 	client := &http.Client{Timeout: 120 * time.Second}
-	resp, err := client.Do(httpReq)
-	if err != nil {
-		c.JSON(502, gin.H{"error": fmt.Sprintf("请求失败: %s", err.Error())})
-		return
-	}
-	defer resp.Body.Close()
 
-	respBody, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode != 200 {
-		c.JSON(resp.StatusCode, gin.H{"error": string(respBody)})
-		return
-	}
+	// 循环调用直到获得纯文本回复（处理 tool calling）
+	maxTurns := 5
+	for turn := 0; turn < maxTurns; turn++ {
+		body, _ := json.Marshal(gin.H{
+			"model":      model,
+			"messages":   fullMsgs,
+			"max_tokens": req.MaxTokens,
+		})
+		reqURL := strings.TrimRight(apiBase, "/") + "/chat/completions"
+		httpReq, _ := http.NewRequest("POST", reqURL, strings.NewReader(string(body)))
+		httpReq.Header.Set("Content-Type", "application/json")
+		httpReq.Header.Set("Authorization", "Bearer "+apiKey)
 
-	// 解析回复（处理 function calling 响应）
-	var result struct {
-		Choices []struct {
-			Message struct {
-				Role          string           `json:"role"`
-				Content       string           `json:"content"`
-				ToolCalls     []gin.H          `json:"tool_calls"`
-			} `json:"message"`
-		} `json:"choices"`
-	}
-	json.Unmarshal(respBody, &result)
+		resp, err := client.Do(httpReq)
+		if err != nil {
+			c.JSON(502, gin.H{"error": fmt.Sprintf("请求失败: %s", err.Error())})
+			return
+		}
+		defer resp.Body.Close()
+		respBody, _ := io.ReadAll(resp.Body)
+		if resp.StatusCode != 200 {
+			c.JSON(resp.StatusCode, gin.H{"error": string(respBody)})
+			return
+		}
 
-	if len(result.Choices) == 0 {
-		c.JSON(200, gin.H{"reply": "（无回复）"})
-		return
-	}
+		var result struct {
+			Choices []struct {
+				Message struct {
+					Role      string `json:"role"`
+					Content   string `json:"content"`
+					ToolCalls []struct {
+						ID       string `json:"id"`
+						Type     string `json:"type"`
+						Function struct {
+							Name      string `json:"name"`
+							Arguments string `json:"arguments"`
+						} `json:"function"`
+					} `json:"tool_calls"`
+				} `json:"message"`
+			} `json:"choices"`
+		}
+		json.Unmarshal(respBody, &result)
 
-	choice := result.Choices[0]
-	reply := choice.Message.Content
-	// 如果有 tool_calls，提取文字内容（过滤掉工具调用标签）
-	if len(choice.Message.ToolCalls) > 0 && reply == "" {
-		// 有些模型用 XML 标签包裹 tool calls，尝试提取纯文本
-		for _, tc := range choice.Message.ToolCalls {
-			if fn, ok := tc["function"].(gin.H); ok {
-				if name, ok := fn["name"].(string); ok {
-					reply += fmt.Sprintf("[调用工具: %s]", name)
-				}
+		if len(result.Choices) == 0 {
+			c.JSON(200, gin.H{"reply": "（无回复）"})
+			return
+		}
+
+		choice := result.Choices[0]
+
+		// 如果有 tool_calls，追加到 history 并继续调用
+		if len(choice.Message.ToolCalls) > 0 {
+			fullMsgs = append(fullMsgs, gin.H{
+				"role":       "assistant",
+				"content":    choice.Message.Content,
+				"tool_calls": choice.Message.ToolCalls,
+			})
+			for _, tc := range choice.Message.ToolCalls {
+				fullMsgs = append(fullMsgs, gin.H{
+					"role":         "tool",
+					"tool_call_id": tc.ID,
+					"content":      fmt.Sprintf("工具 %s 已执行，请继续回答", tc.Function.Name),
+				})
 			}
+			continue
 		}
-	}
-	// 移除可能的 XML/特殊标记
-	if reply != "" {
-		// 清理 tool call 标记
-		replaceStrs := []struct{ old, new string }{
-			{"<|assistant|>", ""}, {"<|tool_call|>", ""}, {"<|tool_calls|>", ""},
-			{"<|end|>", ""}, {"\n", " "},
-		}
-		cleaned := reply
-		for _, r := range replaceStrs {
-			cleaned = strings.ReplaceAll(cleaned, r.old, r.new)
-		}
-		reply = strings.TrimSpace(cleaned)
+
+		// 纯文本回复，清理特殊标记
+		reply := choice.Message.Content
+		reply = strings.ReplaceAll(reply, "<|assistant|>", "")
+		reply = strings.ReplaceAll(reply, "<|tool_call|>", "")
+		reply = strings.ReplaceAll(reply, "<|tool_calls|>", "")
+		reply = strings.ReplaceAll(reply, "<|end|>", "")
+		reply = strings.TrimSpace(reply)
+
+		// 保存对话到数据库
+		tx, _ := database.DB.Begin()
+		tx.Exec("INSERT INTO copilot_messages(session_id, role, content) VALUES(?, ?, ?)", req.SessionID, "user", req.Messages[len(req.Messages)-1]["content"])
+		tx.Exec("INSERT INTO copilot_messages(session_id, role, content) VALUES(?, ?, ?)", req.SessionID, "assistant", reply)
+		tx.Exec("UPDATE copilot_sessions SET model=? WHERE id=?", model, req.SessionID)
+		tx.Commit()
+
+		c.JSON(200, gin.H{"reply": reply, "model": model})
+		return
 	}
 
-	// 保存对话到数据库
-	tx, _ := database.DB.Begin()
-	tx.Exec("INSERT INTO copilot_messages(session_id, role, content) VALUES(?, ?, ?)", req.SessionID, "user", req.Messages[len(req.Messages)-1]["content"])
-	tx.Exec("INSERT INTO copilot_messages(session_id, role, content) VALUES(?, ?, ?)", req.SessionID, "assistant", reply)
-	tx.Exec("UPDATE copilot_sessions SET model=? WHERE id=?", model, req.SessionID)
-	tx.Commit()
-
-	c.JSON(200, gin.H{"reply": reply, "model": req.Model})
+	// 超过最大轮次
+	c.JSON(200, gin.H{"reply": "（AI 调用工具次数过多，已中止）", "model": model})
 }
 
-// 获取其他会话最近消息（跨会话回忆）
 func CopilotGetRecentMessages(c *gin.Context) {
 	sessionID := c.Param("id")
 	limit := c.DefaultQuery("limit", "20")

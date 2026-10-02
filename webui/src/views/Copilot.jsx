@@ -178,8 +178,8 @@ const CopilotView = () => {
       setActiveProvider(updated);
       setProviders(prev => prev.map(p => p.id === activeProvider.id ? updated : p));
       if (activeSessionId) {
-        await apiClient.put(`/copilot/session/${activeSessionId}`, { name: '', model: activeModel, api_key: editKey, api_base: activeProvider.api_base });
-        setSessions(prev => prev.map(s => s.id === activeSessionId ? { ...s, api_key: editKey, api_base: activeProvider.api_base } : s));
+        await apiClient.put(`/copilot/session/${activeSessionId}`, { name: '', model: activeModel, api_base: activeProvider.api_base });
+        setSessions(prev => prev.map(s => s.id === activeSessionId ? { ...s, api_base: activeProvider.api_base } : s));
       }
     } catch {} finally { setSavingKey(null); }
   };
@@ -236,8 +236,6 @@ const CopilotView = () => {
     try {
       const res = await apiClient.post('/copilot/chat', {
         session_id: activeSessionId,
-        api_base: activeProvider.api_base,
-        api_key: activeProvider.api_key,
         model: activeModel,
         messages: history.map(m => ({ role: m.role, content: m.content })),
         recall_sessions: recallSessions,

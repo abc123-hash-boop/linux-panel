@@ -228,6 +228,8 @@ const CopilotView = () => {
     try {
       const res = await apiClient.post('/copilot/chat', {
         session_id: activeSessionId,
+        api_key: activeProvider.api_key,
+        api_base: activeProvider.api_base,
         model: activeModel,
         messages: history.map(m => ({ role: m.role, content: m.content })),
         recall_sessions: recallSessions,

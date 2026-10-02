@@ -71,16 +71,23 @@ const CopilotView = () => {
 
   const restoreSessionConfig = (session) => {
     if (!session) return;
+    // 恢复 provider（通过 api_base 匹配）
     if (session.api_base) {
       const prov = providers.find(p => p.api_base === session.api_base);
       if (prov) {
         setActiveProvider({ ...prov, api_key: session.api_key || '' });
+        return;
       }
     }
-    if (session.model) setActiveModel(session.model);
-    else if (activeProvider && allModels[activeProvider.id]?.length > 0) {
-      setActiveModel(allModels[activeProvider.id][0]);
+    // 如果没有匹配的 provider，创建一个临时的
+    if (session.api_base) {
+      setActiveProvider({
+        id: -1, name: '自定义', icon: '🔧',
+        api_base: session.api_base, api_key: session.api_key || '', _preset: false
+      });
     }
+    // 恢复 model
+    if (session.model) setActiveModel(session.model);
   };
 
   const loadSessionMessages = async () => {
@@ -310,7 +317,13 @@ const CopilotView = () => {
         </div>
 
         <div className="flex-1 overflow-y-auto p-4 space-y-4">
-          {messages.length === 0 && (
+          {!activeSessionId ? (
+            <div className="flex flex-col items-center justify-center h-full text-gray-400 space-y-3">
+              <div className="w-12 h-12 bg-violet-100 rounded-xl flex items-center justify-center"><Sparkles className="text-violet-500" size={24} /></div>
+              <p className="text-sm">请选择或创建一个会话</p>
+              <p className="text-xs text-gray-300">点击左侧 + 按钮创建新会话</p>
+            </div>
+          ) : messages.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-full text-gray-400 space-y-3">
               <div className="w-12 h-12 bg-violet-100 rounded-xl flex items-center justify-center"><Sparkles className="text-violet-500" size={24} /></div>
               <p className="text-sm">开始与 Copilot 对话</p>

@@ -331,7 +331,7 @@ func CopilotChat(c *gin.Context) {
 
 	// 从会话读取配置
 	var sessAPIBase, sessModel, recallSessionsStr string
-	err := database.DB.QueryRow("SELECT api_base, model, COALESCE(recall_sessions,'') FROM copilot_sessions WHERE id=?", req.SessionID).Scan(&sessAPIBase, &sessModel, &recallSessionsStr)
+	err := database.DB.QueryRow("SELECT COALESCE(api_base,''), COALESCE(model,''), COALESCE(recall_sessions,'') FROM copilot_sessions WHERE id=?", req.SessionID).Scan(&sessAPIBase, &sessModel, &recallSessionsStr)
 	if err != nil {
 		c.JSON(404, gin.H{"error": "session not found"})
 		return
@@ -339,12 +339,22 @@ func CopilotChat(c *gin.Context) {
 	apiBase := sessAPIBase
 	model := sessModel
 
-	// api_key 从 provider 读取（全局）
+	// 如果会话没有 api_base，从 Provider 表获取
+	if apiBase == "" {
+		database.DB.QueryRow("SELECT api_base FROM copilot_providers LIMIT 1").Scan(&apiBase)
+	}
+	if model == "" {
+		model = "gpt-4o"
+	}
+
+	// api_key 从 Provider 读取（全局）
 	apiKey := ""
-	var provID int64
-	database.DB.QueryRow("SELECT id FROM copilot_providers WHERE api_base=?", apiBase).Scan(&provID)
-	if provID > 0 {
-		database.DB.QueryRow("SELECT api_key FROM copilot_providers WHERE id=?", provID).Scan(&apiKey)
+	if apiBase != "" {
+		var provID int64
+		database.DB.QueryRow("SELECT id FROM copilot_providers WHERE api_base=?", apiBase).Scan(&provID)
+		if provID > 0 {
+			database.DB.QueryRow("SELECT api_key FROM copilot_providers WHERE id=?", provID).Scan(&apiKey)
+		}
 	}
 	if apiKey == "" || apiBase == "" || model == "" {
 		c.JSON(400, gin.H{"error": "missing config"})

@@ -317,13 +317,14 @@ const CopilotView = () => {
         </div>
 
         <div className="flex-1 overflow-y-auto p-4 space-y-4">
-          {!activeSessionId ? (
+          {!activeSessionId && (
             <div className="flex flex-col items-center justify-center h-full text-gray-400 space-y-3">
               <div className="w-12 h-12 bg-violet-100 rounded-xl flex items-center justify-center"><Sparkles className="text-violet-500" size={24} /></div>
               <p className="text-sm">请选择或创建一个会话</p>
               <p className="text-xs text-gray-300">点击左侧 + 按钮创建新会话</p>
             </div>
-          ) : messages.length === 0 ? (
+          )}
+          {activeSessionId && messages.length === 0 && (
             <div className="flex flex-col items-center justify-center h-full text-gray-400 space-y-3">
               <div className="w-12 h-12 bg-violet-100 rounded-xl flex items-center justify-center"><Sparkles className="text-violet-500" size={24} /></div>
               <p className="text-sm">开始与 Copilot 对话</p>

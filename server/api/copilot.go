@@ -483,11 +483,15 @@ func CopilotChat(c *gin.Context) {
 			for _, tc := range choice.Message.ToolCalls {
 				output := ""
 				if tc.Function.Name == "bash" {
-					// 执行 shell 命令
-					cmd := exec.Command("bash", "-c", tc.Function.Arguments)
+					// 解析参数 JSON
+					var args struct {
+						Command string `json:"command"`
+					}
+					json.Unmarshal([]byte(tc.Function.Arguments), &args)
+					cmd := exec.Command("bash", "-c", args.Command)
 					out, err := cmd.CombinedOutput()
 					if err != nil {
-						output = fmt.Sprintf("命令执行失败: %v\n输出: %s", err, string(out))
+						output = fmt.Sprintf("执行失败: %v\n%s", err, string(out))
 					} else {
 						output = string(out)
 					}

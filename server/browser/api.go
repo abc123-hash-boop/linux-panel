@@ -288,7 +288,7 @@ func browserNavigateToolHandler(m *SessionManager) gin.HandlerFunc {
 	}
 }
 
-// browserClickToolHandler 点击工具：在 (x,y) 处执行鼠标点击
+// browserClickToolHandler 点击工具：支持坐标或元素 ID（如 @a）
 func browserClickToolHandler(m *SessionManager) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		s, ok := m.GetSession(c.Param("id"))
@@ -299,10 +299,45 @@ func browserClickToolHandler(m *SessionManager) gin.HandlerFunc {
 		var req struct {
 			X float64 `json:"x"`
 			Y float64 `json:"y"`
+			ID  string  `json:"id"` // 元素 ID，如 "@a"
 		}
 		_ = c.ShouldBindJSON(&req)
+
+		if req.ID != "" {
+			// 按元素 ID 点击
+			wsURL, err := s.pageWSURL()
+			if err != nil {
+				c.JSON(500, gin.H{"error": err.Error()})
+				return
+			}
+			conn, err := dialCDP(wsURL, 5*time.Second)
+			if err != nil {
+				c.JSON(500, gin.H{"error": err.Error()})
+				return
+			}
+			var res struct {
+				Result struct {
+					Value string `json:"value"`
+				} `json:"result"`
+			}
+			expr := fmt.Sprintf(`(function(){var el=document.getElementById(%q);if(el){el.click();return"clicked"}else{return"not_found"}})()`, req.ID)
+			if err := conn.Call("Runtime.evaluate", map[string]interface{}{
+				"expression":  expr,
+				"returnByValue": true,
+			}, &res, 5*time.Second); err != nil {
+				c.JSON(500, gin.H{"error": err.Error()})
+				return
+			}
+			go func() {
+				time.Sleep(80 * time.Millisecond)
+				// mouseup 不需要，JS click() 自动完成完整点击
+			}()
+			c.JSON(200, gin.H{"ok": true, "result": res.Result.Value})
+			return
+		}
+
+		// 坐标点击（兼容旧调用）
 		_ = s.InputEvent(BrowserInputMsg{Type: "mousedown", X: req.X, Y: req.Y})
-		// 短延迟后抬起，模拟真实点击
 		go func() {
 			time.Sleep(80 * time.Millisecond)
 			_ = s.InputEvent(BrowserInputMsg{Type: "mouseup", X: req.X, Y: req.Y})

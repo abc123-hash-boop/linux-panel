@@ -397,16 +397,16 @@ func CopilotChat(c *gin.Context) {
 		}
 	}
 
-	// 构建 system prompt（统一模式：DOM + 文字交互，所有模型均可用）
+	// 构建 system prompt（统一模式：DOM + 元素 ID 点击，所有模型均可用）
 	sysContent := "You are a professional Linux server management assistant. Answer concisely and accurately."
 	sysContent += "\n\nYou can use the bash tool to execute Linux commands to get system information."
 	sysContent += "\n\nYou also have BROWSER TOOLS to control a headless Chrome. Use these when the user asks about websites, web pages, or needs to interact with web content:"
 	sysContent += "\n- browser_navigate: navigate to a URL"
-	sysContent += "\n- browser_click: click an element at coordinates (x, y) — use this to click buttons, links, inputs"
+	sysContent += "\n- browser_click: click an element — prefer using id like \"@a\" or \"@b\" (elements get auto-assigned unique IDs), fallback to x,y coordinates"
 	sysContent += "\n- browser_type: type text into the currently focused input field"
 	sysContent += "\n- browser_text: get the visible text content of the current page"
-	sysContent += "\n- browser_dom: get the full HTML DOM of the current page — use this after navigating or clicking to see what the page looks like (link text, form fields, buttons, headings, etc.)"
-	sysContent += "\n\nBrowser workflow: navigate first, wait for the page to load, then use browser_dom or browser_text to understand the page. Use browser_click to interact with buttons/links. After clicking, call browser_dom again to see the result."
+	sysContent += "\n- browser_dom: get the full HTML DOM of the current page — after navigating or clicking, call this to see what the page contains (links, buttons with @ IDs, forms, etc.)"
+	sysContent += "\n\nBrowser workflow: navigate to URL → call browser_dom to see the page structure (buttons have @ IDs like @a, @b, @c) → use browser_click with the @ ID to interact → call browser_dom again to see the result."
 	sysContent += "\n\nRules:"
 	sysContent += "\n1. Only call tools when necessary (e.g., check system status, execute commands)"
 	sysContent += "\n2. Do not repeatedly try different commands"

@@ -387,6 +387,45 @@ func (s *Session) Navigate(targetURL string) error {
 	s.mu.Lock()
 	s.CurrentURL = targetURL
 	s.mu.Unlock()
+	// 导航后注入元素 ID，方便 AI 通过 @a/@b 等点击
+	time.Sleep(500 * time.Millisecond)
+	_ = s.injectElementIds()
+	return nil
+}
+
+// injectElementIds 为页面上所有可交互元素分配唯一 ID（@a, @b, @c...）
+func (s *Session) injectElementIds() error {
+	wsURL, err := s.pageWSURL()
+	if err != nil {
+		return err
+	}
+	conn, err := dialCDP(wsURL, 5*time.Second)
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+	var res struct {
+		Result struct {
+			Value string `json:"value"`
+		} `json:"result"`
+	}
+	expr := `
+		(function(){
+			var i = 0;
+			var tags = 'button,a,input,select,textarea,[role="button"],[role="link"],[role="tab"],[role="menuitem"],[type="submit"],[type="button"],[type="reset"],details,summary';
+			document.querySelectorAll(tags).forEach(function(el){
+				if(el.id && el.id.startsWith('@')) return;
+				el.id = '@' + (i++);
+			});
+			return i + ' elements tagged';
+		})()
+	`
+	if err := conn.Call("Runtime.evaluate", map[string]interface{}{
+		"expression": expr,
+		"returnByValue": true,
+	}, &res, 5*time.Second); err != nil {
+		return err
+	}
 	return nil
 }
 

@@ -1,9 +1,11 @@
 package api
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
 	"net/http"
 	"os/exec"
 	"strings"
@@ -77,7 +79,8 @@ func CopilotCreateSession(c *gin.Context) {
 		}
 	}
 	if lastModel == "" {
-		lastModel = "gpt-4o"
+		// 不默认设置为 gpt-4o，留空让用户自己选择
+		lastModel = ""
 	}
 	id, err := database.DB.Exec("INSERT INTO copilot_sessions(name, model, api_key, api_base, recall_sessions) VALUES(?,?,?,?,?)",
 		name, lastModel, "", lastBase, "{}")
@@ -108,6 +111,9 @@ func CopilotUpdateSession(c *gin.Context) {
 
 func CopilotDeleteSession(c *gin.Context) {
 	id := c.Param("id")
+	// 先删除该会话的所有消息
+	database.DB.Exec("DELETE FROM copilot_messages WHERE session_id=?", id)
+	// 再删除会话
 	database.DB.Exec("DELETE FROM copilot_sessions WHERE id=?", id)
 	c.JSON(200, gin.H{"message": "deleted"})
 }
@@ -392,13 +398,19 @@ func CopilotChat(c *gin.Context) {
 	}
 
 	// 构建 system prompt
-	sysContent := "你是一个专业的 Linux 服务器管理助手。请简洁、准确地回答用户的问题。使用中文回答。"
-	sysContent += "\n\n你可以通过调用 bash 工具执行 Linux 命令来获取系统信息。"
-	sysContent += "\n\n重要规则："
-	sysContent += "\n1. 仅在必要时调用工具（如查询系统状态、执行命令）"
-	sysContent += "\n2. 每个问题最多调用 1 次工具"
-	sysContent += "\n3. 不要反复尝试不同的命令"
-	sysContent += "\n4. 如果用户的问题不需要查询系统，直接回答即可"
+	sysContent := "You are a professional Linux server management assistant. Answer concisely and accurately."
+	sysContent += "\n\nYou can use the bash tool to execute Linux commands to get system information."
+	sysContent += "\n\nYou also have browser tools to control a headless Chrome:"
+	sysContent += "\n- browser_screenshot: take a screenshot of the current browser page"
+	sysContent += "\n- browser_navigate: navigate to a URL"
+	sysContent += "\n- browser_click: click at coordinates (x, y)"
+	sysContent += "\n- browser_type: type text into the focused input field"
+	sysContent += "\n- browser_text: get the visible text content of the current page"
+	sysContent += "\n\nRules:"
+	sysContent += "\n1. Only call tools when necessary (e.g., check system status, execute commands)"
+	sysContent += "\n2. Do not repeatedly try different commands"
+	sysContent += "\n3. If the user's question doesn't require querying the system, answer directly"
+	sysContent += "\n4. Reply in the same language as the user"
 	if recallContext != "" {
 		sysContent += "\n\n以下是对话历史中的相关上下文，请结合参考：\n" + recallContext
 	}
@@ -483,7 +495,6 @@ func CopilotChat(c *gin.Context) {
 			for _, tc := range choice.Message.ToolCalls {
 				output := ""
 				if tc.Function.Name == "bash" {
-					// 解析参数 JSON
 					var args struct {
 						Command string `json:"command"`
 					}
@@ -494,6 +505,122 @@ func CopilotChat(c *gin.Context) {
 						output = fmt.Sprintf("执行失败: %v\n%s", err, string(out))
 					} else {
 						output = string(out)
+					}
+				} else if tc.Function.Name == "read" {
+					// 读取文件
+					var args struct {
+						Path string `json:"path"`
+					}
+					json.Unmarshal([]byte(tc.Function.Arguments), &args)
+					content, err := os.ReadFile(args.Path)
+					if err != nil {
+						output = fmt.Sprintf("读取失败: %v", err)
+					} else {
+						output = string(content)
+					}
+				} else if tc.Function.Name == "write" {
+					// 写入文件
+					var args struct {
+						Path    string `json:"path"`
+						Content string `json:"content"`
+					}
+					json.Unmarshal([]byte(tc.Function.Arguments), &args)
+					err := os.WriteFile(args.Path, []byte(args.Content), 0644)
+					if err != nil {
+						output = fmt.Sprintf("写入失败: %v", err)
+					} else {
+						output = "写入成功"
+					}
+				} else if tc.Function.Name == "browser_screenshot" || tc.Function.Name == "browser_navigate" ||
+					tc.Function.Name == "browser_click" || tc.Function.Name == "browser_type" || tc.Function.Name == "browser_text" {
+					// 查找活跃浏览器 session（通过 API 查询）
+					var sessionID string
+					listResp, err := http.Get("http://localhost:8080/browser/sessions")
+					if err == nil {
+						var sessions []struct {
+							ID     string `json:"id"`
+							Status string `json:"status"`
+						}
+						json.NewDecoder(listResp.Body).Decode(&sessions)
+						listResp.Body.Close()
+						for _, s := range sessions {
+							if s.Status == "running" {
+								sessionID = s.ID
+								break
+							}
+						}
+					}
+					if sessionID == "" {
+						// 没有活跃 session，创建一个新的
+						createResp, err := http.Post("http://localhost:8080/browser/sessions", "application/json", nil)
+						if err != nil {
+							output = fmt.Sprintf("创建浏览器 session 失败: %v", err)
+						} else {
+							var newSession struct{ ID string `json:"id"` }
+							json.NewDecoder(createResp.Body).Decode(&newSession)
+							createResp.Body.Close()
+							sessionID = newSession.ID
+						}
+					}
+					if sessionID == "" {
+						output = "没有可用的浏览器 session"
+					} else {
+						baseURL := fmt.Sprintf("http://localhost:8080/browser/sessions/%s/tools", sessionID)
+						var reqBody io.Reader
+						switch tc.Function.Name {
+						case "browser_screenshot":
+							reqBody = nil
+						case "browser_navigate":
+							var a struct{ URL string `json:"url"` }
+							json.Unmarshal([]byte(tc.Function.Arguments), &a)
+							b, _ := json.Marshal(a)
+							reqBody = bytes.NewReader(b)
+						case "browser_click":
+							var a struct {
+								X float64 `json:"x"`
+								Y float64 `json:"y"`
+							}
+							json.Unmarshal([]byte(tc.Function.Arguments), &a)
+							b, _ := json.Marshal(a)
+							reqBody = bytes.NewReader(b)
+						case "browser_type":
+							var a struct{ Text string `json:"text"` }
+							json.Unmarshal([]byte(tc.Function.Arguments), &a)
+							b, _ := json.Marshal(a)
+							reqBody = bytes.NewReader(b)
+						case "browser_text":
+							reqBody = nil
+						}
+						method := "GET"
+						if reqBody != nil {
+							method = "POST"
+						}
+						url := baseURL + "/" + tc.Function.Name
+						if tc.Function.Name == "browser_screenshot" {
+							url = baseURL + "/screenshot"
+						} else if tc.Function.Name == "browser_text" {
+							url = baseURL + "/text"
+						}
+						req, _ := http.NewRequest(method, url, reqBody)
+						req.Header.Set("Content-Type", "application/json")
+						httpClient := &http.Client{Timeout: 15 * time.Second}
+						resp2, err := httpClient.Do(req)
+						if err != nil {
+							output = fmt.Sprintf("浏览器工具调用失败: %v", err)
+						} else {
+							var result map[string]interface{}
+							json.NewDecoder(resp2.Body).Decode(&result)
+							resp2.Body.Close()
+							if tc.Function.Name == "browser_screenshot" {
+								img := result["image"].(string)
+								u := result["url"].(string)
+								output = fmt.Sprintf("页面截图 (当前: %s)\n![screenshot](%s)", u, img)
+							} else if tc.Function.Name == "browser_text" {
+								output = fmt.Sprintf("页面文本:\n%s", result["text"])
+							} else {
+								output = fmt.Sprintf("%v", result)
+							}
+						}
 					}
 				} else {
 					output = fmt.Sprintf("未知工具: %s", tc.Function.Name)

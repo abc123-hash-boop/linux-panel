@@ -632,8 +632,27 @@ func parseScript(script string) ([]scriptCmd, error) {
 		if line == "" || strings.HasPrefix(line, "//") {
 			continue
 		}
-		// 去掉行尾注释
-		if idx := strings.Index(line, "//"); idx >= 0 {
+		// 去掉行尾注释（跳过引号内的 //）
+		inQ := false
+		qc := byte(0)
+		idx := -1
+		for i := 0; i < len(line)-1; i++ {
+			c := line[i]
+			if !inQ && (c == '"' || c == '\'') {
+				inQ = true
+				qc = c
+				continue
+			}
+			if inQ && c == qc {
+				inQ = false
+				continue
+			}
+			if !inQ && line[i] == '/' && line[i+1] == '/' {
+				idx = i
+				break
+			}
+		}
+		if idx >= 0 {
 			line = line[:idx]
 		}
 		line = strings.TrimSpace(line)

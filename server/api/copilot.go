@@ -397,16 +397,27 @@ func CopilotChat(c *gin.Context) {
 		}
 	}
 
-	// 构建 system prompt（统一模式：DOM + 元素 ID 点击，所有模型均可用）
+	// 构建 system prompt（统一模式：优先使用脚本批量操作，减少请求次数）
 	sysContent := "You are a professional Linux server management assistant. Answer concisely and accurately."
 	sysContent += "\n\nYou can use the bash tool to execute Linux commands to get system information."
-	sysContent += "\n\nYou also have BROWSER TOOLS to control a headless Chrome. Use these when the user asks about websites, web pages, or needs to interact with web content:"
-	sysContent += "\n- browser_navigate: navigate to a URL"
-	sysContent += "\n- browser_click: click an element — prefer using id like \"@a\" or \"@b\" (elements get auto-assigned unique IDs), fallback to x,y coordinates"
-	sysContent += "\n- browser_type: type text into the currently focused input field"
-	sysContent += "\n- browser_text: get the visible text content of the current page"
-	sysContent += "\n- browser_dom: get the full HTML DOM of the current page — after navigating or clicking, call this to see what the page contains (links, buttons with @ IDs, forms, etc.)"
-	sysContent += "\n\nBrowser workflow: navigate to URL → call browser_dom to see the page structure (buttons have @ IDs like @a, @b, @c) → use browser_click with the @ ID to interact → call browser_dom again to see the result."
+	sysContent += "\n\nYou also have BROWSER TOOLS to control a headless Chrome. Use these when the user asks about websites or needs to interact with web content:"
+	sysContent += "\n\n**Preferred: Use `browser_script` for multi-step operations (one request = entire workflow):**"
+	sysContent += "\n```"
+	sysContent += "\nbrowser_script('open(\"https://example.com\")\\nclick(\"@1\")\\ndom()')"
+	sysContent += "\n```"
+	sysContent += "\nSupported script commands:"
+	sysContent += "\n- open(url) — navigate to URL"
+	sysContent += "\n- click(id) — click element by @ ID (e.g. @1, @2), or 'x,y' coordinates"
+	sysContent += "\n- type(text, id) — type text into element, or type into focused field"
+	sysContent += "\n- screenshot() — return base64 JPEG of current page"
+	sysContent += "\n- dom() — return full HTML DOM (use after navigate/click to see page state)"
+	sysContent += "\n- text() — return visible text content"
+	sysContent += "\n- wait(ms) — wait N milliseconds"
+	sysContent += "\n- back() — go back in history"
+	sysContent += "\n- reload() — reload current page"
+	sysContent += "\n\n**Fallback individual tools (use only when script is not suitable):**"
+	sysContent += "\n- browser_navigate / browser_click / browser_type / browser_text / browser_dom / browser_screenshot"
+	sysContent += "\n\nWorkflow: open a URL → dom() to see page structure → click/@ID elements → dom() to verify result."
 	sysContent += "\n\nRules:"
 	sysContent += "\n1. Only call tools when necessary (e.g., check system status, execute commands)"
 	sysContent += "\n2. Do not repeatedly try different commands"
@@ -534,7 +545,7 @@ func CopilotChat(c *gin.Context) {
 					}
 				} else if tc.Function.Name == "browser_screenshot" || tc.Function.Name == "browser_navigate" ||
 					tc.Function.Name == "browser_click" || tc.Function.Name == "browser_type" || tc.Function.Name == "browser_text" ||
-					tc.Function.Name == "browser_dom" {
+					tc.Function.Name == "browser_dom" || tc.Function.Name == "browser_script" {
 					// 查找活跃浏览器 session（通过 API 查询）
 					var sessionID string
 					listResp, err := http.Get("http://localhost:8080/browser/sessions")
@@ -625,6 +636,42 @@ func CopilotChat(c *gin.Context) {
 								output = fmt.Sprintf("页面文本:\n%s", result["text"])
 							} else if tc.Function.Name == "browser_dom" {
 								output = fmt.Sprintf("页面 DOM:\n%s", result["dom"])
+							} else if tc.Function.Name == "browser_script" {
+								// 脚本结果是一个步骤数组
+								if steps, ok := result["results"].([]interface{}); ok {
+									var lines []string
+									for _, st := range steps {
+										m := st.(map[string]interface{})
+										stepNum := int(m["step"].(float64))
+										cmd := m["cmd"]
+										if err, hasErr := m["error"]; hasErr {
+											lines = append(lines, fmt.Sprintf("  [步骤%d] %v → 错误: %v", stepNum, cmd, err))
+										} else {
+											msg := fmt.Sprintf("  [步骤%d] %v → ok", stepNum, cmd)
+											if url, hasURL := m["url"]; hasURL {
+												msg += fmt.Sprintf(" (url=%v)", url)
+											}
+											if dom, hasDOM := m["dom"]; hasDOM {
+												d := dom.(string)
+												if len(d) > 200 {
+													d = d[:200] + "...(truncated)"
+												}
+												msg += fmt.Sprintf("\n        DOM: %s", d)
+											}
+											if txt, hasTxt := m["text"]; hasTxt {
+												t := txt.(string)
+												if len(t) > 200 {
+													t = t[:200] + "...(truncated)"
+												}
+												msg += fmt.Sprintf("\n        Text: %s", t)
+											}
+											lines = append(lines, msg)
+										}
+									}
+									output = "浏览器脚本执行结果:\n" + strings.Join(lines, "\n")
+								} else {
+									output = fmt.Sprintf("%v", result)
+								}
 							} else {
 								output = fmt.Sprintf("%v", result)
 							}

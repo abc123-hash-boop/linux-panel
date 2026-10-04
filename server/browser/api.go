@@ -32,6 +32,7 @@ func RegisterRoutes(r *gin.Engine, manager *SessionManager) {
 		browser.POST("/sessions/:id/tools/type", browserTypeToolHandler(manager))
 		browser.GET("/sessions/:id/tools/text", browserTextHandler(manager))
 		browser.GET("/sessions/:id/tools/dom", browserDomHandler(manager))
+		browser.POST("/sessions/:id/tools/script", browserScriptHandler(manager))
 		whipRoutes(browser, manager)
 	}
 }
@@ -405,4 +406,304 @@ func browserDomHandler(m *SessionManager) gin.HandlerFunc {
 		}
 		c.JSON(200, gin.H{"ok": true, "dom": html})
 	}
+}
+
+// scriptCmd 一条脚本命令
+type scriptCmd struct {
+	Func string // open / click / type / screenshot / text / dom / wait / back / reload
+	Args []string
+}
+
+// browserScriptHandler 批量执行浏览器脚本，一步完成多次操作，大幅减少请求次数
+func browserScriptHandler(m *SessionManager) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		s, ok := m.GetSession(c.Param("id"))
+		if !ok {
+			c.JSON(404, gin.H{"error": "session not found"})
+			return
+		}
+		var req struct {
+			Script string `json:"script" binding:"required"`
+		}
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(400, gin.H{"error": "script required"})
+			return
+		}
+
+		cmds, err := parseScript(req.Script)
+		if err != nil {
+			c.JSON(400, gin.H{"error": err.Error()})
+			return
+		}
+
+		var results []map[string]interface{}
+		for i, cmd := range cmds {
+			step := map[string]interface{}{"step": i + 1, "cmd": cmd.Func}
+			switch cmd.Func {
+			case "open":
+				if len(cmd.Args) < 1 {
+					step["error"] = "open requires url"
+					results = append(results, step)
+					continue
+				}
+				if err := s.Navigate(cmd.Args[0]); err != nil {
+					step["error"] = err.Error()
+				} else {
+					info := s.Info()
+					step["ok"] = true
+					step["url"] = info.URL
+					step["view"] = gin.H{"w": info.ViewW, "h": info.ViewH}
+				}
+			case "click":
+				if len(cmd.Args) < 1 {
+					step["error"] = "click requires element id (@X) or x,y"
+					results = append(results, step)
+					continue
+				}
+				arg := cmd.Args[0]
+				if strings.HasPrefix(arg, "@") {
+					// 按元素 ID 点击
+					wsURL, err := s.pageWSURL()
+					if err != nil {
+						step["error"] = err.Error()
+						results = append(results, step)
+						continue
+					}
+					conn, err := dialCDP(wsURL, 5*time.Second)
+					if err != nil {
+						step["error"] = err.Error()
+						results = append(results, step)
+						continue
+					}
+					var res struct{ Result struct{ Value string } `json:"result"` }
+					expr := fmt.Sprintf(`(function(){var el=document.getElementById(%q);if(el){el.click();return"clicked"}else{return"not_found"}})()`, arg)
+					if err := conn.Call("Runtime.evaluate", map[string]interface{}{"expression": expr, "returnByValue": true}, &res, 5*time.Second); err != nil {
+						step["error"] = err.Error()
+					} else {
+						step["ok"] = true
+						step["result"] = res.Result.Value
+					}
+					_ = conn.Close()
+				} else {
+					// 坐标点击
+					var x, y float64
+					fmt.Sscanf(arg, "%f,%f", &x, &y)
+					if x == 0 && y == 0 && arg != "0,0" {
+						fmt.Sscanf(arg, "%f %f", &x, &y)
+					}
+					_ = s.InputEvent(BrowserInputMsg{Type: "mousedown", X: x, Y: y})
+					go func() {
+						time.Sleep(80 * time.Millisecond)
+						_ = s.InputEvent(BrowserInputMsg{Type: "mouseup", X: x, Y: y})
+					}()
+					step["ok"] = true
+				}
+			case "type":
+				if len(cmd.Args) < 1 {
+					step["error"] = "type requires text"
+					results = append(results, step)
+					continue
+				}
+				text := cmd.Args[0]
+				if len(cmd.Args) >= 2 && strings.HasPrefix(cmd.Args[1], "@") {
+					// 先聚焦到指定元素再输入
+					wsURL, err := s.pageWSURL()
+					if err != nil {
+						step["error"] = err.Error()
+						results = append(results, step)
+						continue
+					}
+					conn, err := dialCDP(wsURL, 5*time.Second)
+					if err != nil {
+						step["error"] = err.Error()
+						results = append(results, step)
+						continue
+					}
+					var res struct{ Result struct{ Value string } `json:"result"` }
+					expr := fmt.Sprintf(`(function(){var el=document.getElementById(%q);if(el){el.focus();el.select();return"focused"}else{return"not_found"}})()`, cmd.Args[1])
+					if err := conn.Call("Runtime.evaluate", map[string]interface{}{"expression": expr, "returnByValue": true}, &res, 5*time.Second); err != nil {
+						step["error"] = err.Error()
+						_ = conn.Close()
+						results = append(results, step)
+						continue
+					}
+					_ = conn.Close()
+				}
+				for _, ch := range text {
+					key := string(ch)
+					code := "Key" + strings.ToUpper(key)
+					_ = s.InputEvent(BrowserInputMsg{Type: "keydown", Key: key, Code: code})
+					_ = s.InputEvent(BrowserInputMsg{Type: "keyup", Key: key, Code: code})
+					time.Sleep(50 * time.Millisecond)
+				}
+				step["ok"] = true
+				step["text"] = text
+			case "screenshot":
+				buf, err := s.Screenshot()
+				if err != nil {
+					step["error"] = err.Error()
+				} else {
+					step["ok"] = true
+					step["image"] = "data:image/jpeg;base64," + base64.StdEncoding.EncodeToString(buf)
+				}
+			case "text":
+				t, err := s.getText()
+				if err != nil {
+					step["error"] = err.Error()
+				} else {
+					step["ok"] = true
+					step["text"] = t
+				}
+			case "dom":
+				h, err := s.getDOM()
+				if err != nil {
+					step["error"] = err.Error()
+				} else {
+					step["ok"] = true
+					step["dom"] = h
+				}
+			case "wait":
+				ms := 500
+				if len(cmd.Args) > 0 {
+					fmt.Sscanf(cmd.Args[0], "%d", &ms)
+				}
+				time.Sleep(time.Duration(ms) * time.Millisecond)
+				step["ok"] = true
+			case "back":
+				wsURL, err := s.pageWSURL()
+				if err != nil {
+					step["error"] = err.Error()
+					results = append(results, step)
+					continue
+				}
+				conn, err := dialCDP(wsURL, 5*time.Second)
+				if err != nil {
+					step["error"] = err.Error()
+					results = append(results, step)
+					continue
+				}
+				var res struct{}
+				if err := conn.Call("Page.goBack", nil, &res, 5*time.Second); err != nil {
+					// Page.goBack 可能不存在，用 JS 替代
+					conn2, _ := dialCDP(wsURL, 5*time.Second)
+					if conn2 != nil {
+						conn2.Call("Runtime.evaluate", map[string]interface{}{"expression": "history.back()", "returnByValue": true}, nil, 3*time.Second)
+						_ = conn2.Close()
+					}
+				} else {
+					step["ok"] = true
+				}
+				_ = conn.Close()
+			case "reload":
+				wsURL, err := s.pageWSURL()
+				if err != nil {
+					step["error"] = err.Error()
+					results = append(results, step)
+					continue
+				}
+				conn, err := dialCDP(wsURL, 5*time.Second)
+				if err != nil {
+					step["error"] = err.Error()
+					results = append(results, step)
+					continue
+				}
+				var res struct{}
+				if err := conn.Call("Page.reload", nil, &res, 5*time.Second); err != nil {
+					step["error"] = err.Error()
+				} else {
+					step["ok"] = true
+				}
+				_ = conn.Close()
+			default:
+				step["error"] = "unknown command: " + cmd.Func
+			}
+			results = append(results, step)
+		}
+		c.JSON(200, gin.H{"ok": true, "results": results})
+	}
+}
+
+// parseScript 解析脚本字符串，支持多行命令和注释
+func parseScript(script string) ([]scriptCmd, error) {
+	var cmds []scriptCmd
+	lines := strings.Split(script, "\n")
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "//") {
+			continue
+		}
+		// 去掉行尾注释
+		if idx := strings.Index(line, "//"); idx >= 0 {
+			line = line[:idx]
+		}
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		// 匹配: func(args) 或 func arg1 arg2
+		var cmd scriptCmd
+		if strings.Contains(line, "(") {
+			// 函数调用形式
+			paren := strings.Index(line, "(")
+			cmd.Func = strings.TrimSpace(line[:paren])
+			inner := line[paren+1:]
+			if strings.HasSuffix(inner, ")") {
+				inner = inner[:len(inner)-1]
+			}
+			inner = strings.TrimSpace(inner)
+			if inner != "" {
+				// 分割参数（支持单引号/双引号字符串）
+				cmd.Args = splitArgs(inner)
+			}
+		} else {
+			// 简单形式: wait 500
+			parts := strings.Fields(line)
+			if len(parts) >= 1 {
+				cmd.Func = parts[0]
+				cmd.Args = parts[1:]
+			}
+		}
+		if cmd.Func != "" {
+			cmds = append(cmds, cmd)
+		}
+	}
+	return cmds, nil
+}
+
+// splitArgs 按逗号分割参数，支持引号内的逗号
+func splitArgs(s string) []string {
+	var args []string
+	var cur strings.Builder
+	inQuote := false
+	quoteChar := byte(0)
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if !inQuote && (c == '"' || c == '\'') {
+			inQuote = true
+			quoteChar = c
+			continue
+		}
+		if inQuote && c == quoteChar {
+			inQuote = false
+			continue
+		}
+		if !inQuote && c == ',' {
+			args = append(args, strings.TrimSpace(cur.String()))
+			cur.Reset()
+			continue
+		}
+		cur.WriteByte(c)
+	}
+	if cur.Len() > 0 {
+		args = append(args, strings.TrimSpace(cur.String()))
+	}
+	// 去掉引号
+	for i, a := range args {
+		if len(a) >= 2 && a[0] == '"' && a[len(a)-1] == '"' {
+			args[i] = a[1 : len(a)-1]
+		} else if len(a) >= 2 && a[0] == '\'' && a[len(a)-1] == '\'' {
+			args[i] = a[1 : len(a)-1]
+		}
+	}
+	return args
 }

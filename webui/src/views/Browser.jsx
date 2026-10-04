@@ -203,6 +203,30 @@ const BrowserView = () => {
     };
   }, [startStream, startInput]);
 
+  /* ---------------- 地址栏同步（轮询当前 URL） ---------------- */
+
+  useEffect(() => {
+    if (!sessionId || status !== 'streaming') return;
+    const poll = async () => {
+      try {
+        const resp = await fetch(`/browser/sessions/${sessionId}/info`);
+        if (!resp.ok) return;
+        const info = await resp.json();
+        if (info.url && info.url !== currentUrl) {
+          setCurrentUrl(info.url);
+          if (!urlFocused) setUrl(info.url);
+        }
+        if (info.view_w || info.view_h) {
+          geomRef.current.viewW = info.view_w || geomRef.current.viewW;
+          geomRef.current.viewH = info.view_h || geomRef.current.viewH;
+        }
+      } catch {}
+    };
+    const timer = setInterval(poll, 2000);
+    poll(); // 立即同步一次
+    return () => clearInterval(timer);
+  }, [sessionId, status, currentUrl, urlFocused]);
+
   /* ---------------- 键盘转发 ---------------- */
 
   useEffect(() => {

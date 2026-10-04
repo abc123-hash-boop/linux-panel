@@ -14,10 +14,19 @@ func AuthWS() gin.HandlerFunc {
 
 		if !auth.Check(c.Request) {
 
-			c.AbortWithStatus(
-				http.StatusUnauthorized,
-			)
+			// 兼容 WebSocket 握手不支持 Cookie 的场景
+			session := c.Query("session")
+			if session == "" {
+				c.AbortWithStatus(http.StatusUnauthorized)
+				return
+			}
 
+			if !auth.CheckSession(session) {
+				c.AbortWithStatus(http.StatusUnauthorized)
+				return
+			}
+
+			c.Next()
 			return
 
 		}

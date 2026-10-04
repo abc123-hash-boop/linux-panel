@@ -1,11 +1,18 @@
 package main
 
 import (
+	"context"
+	"log"
+	"net/http"
 	"os"
+	"os/signal"
+	"syscall"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
 	panelApi "panel/api"
+	"panel/browser"
 	"panel/database"
 	"panel/middleware"
 	"panel/service"
@@ -374,11 +381,19 @@ func main() {
 		middleware.AuthWS(),
 		websocket.DockerPull,
 	)
+
 	r.GET(
 		"/ws/docker/exec/:id",
 		middleware.AuthWS(),
 		websocket.DockerExecTerminal,
 	)
+	/*
+	 * ============================================================
+	 * Browser Runtime API（Session 管理 + CDP + 视频流）
+	 * ============================================================
+	 */
+
+	browser.RegisterRoutes(r, browser.DefaultManager)
 
 	/*
 	 * ============================================================
@@ -453,5 +468,32 @@ func main() {
 	 * ============================================================
 	 */
 
-	r.Run(":8080")
+	// 清理上次运行残留的 Chrome 进程与 profile
+	browser.DefaultManager.CleanupOldSessions()
+
+	srv := &http.Server{
+		Addr:    ":8080",
+		Handler: r,
+	}
+
+	go func() {
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("listen: %v", err)
+		}
+	}()
+
+	// 等待退出信号，关闭所有 Browser Session，避免 Chrome 僵尸进程
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+	<-quit
+
+	log.Println("shutting down, closing browser sessions...")
+	browser.DefaultManager.Shutdown()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := srv.Shutdown(ctx); err != nil {
+		log.Printf("server shutdown: %v", err)
+	}
+	log.Println("shutdown complete")
 }

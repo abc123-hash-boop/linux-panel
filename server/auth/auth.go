@@ -79,6 +79,13 @@ func Check(r *http.Request) bool {
 
 }
 
+func CheckSession(sessionID string) bool {
+	lock.RLock()
+	defer lock.RUnlock()
+	_, ok := sessions[sessionID]
+	return ok
+}
+
 // 设置Cookie
 
 func SetCookie(
@@ -93,8 +100,6 @@ func SetCookie(
 		Value: session,
 
 		Path: "/",
-
-		HttpOnly: true,
 
 		MaxAge: 86400,
 

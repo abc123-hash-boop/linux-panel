@@ -381,34 +381,16 @@ func browserTextHandler(m *SessionManager) gin.HandlerFunc {
 			c.JSON(404, gin.H{"error": "session not found"})
 			return
 		}
-		wsURL, err := s.pageWSURL()
+		text, err := s.getText()
 		if err != nil {
 			c.JSON(500, gin.H{"error": err.Error()})
 			return
 		}
-		conn, err := dialCDP(wsURL, 5*time.Second)
-		if err != nil {
-			c.JSON(500, gin.H{"error": err.Error()})
-			return
-		}
-		defer conn.Close()
-		var res struct {
-			Result struct {
-				Value string `json:"value"`
-			} `json:"result"`
-		}
-		if err := conn.Call("Runtime.evaluate", map[string]interface{}{
-			"expression":  "document.body.innerText",
-			"returnByValue": true,
-		}, &res, 5*time.Second); err != nil {
-			c.JSON(500, gin.H{"error": err.Error()})
-			return
-		}
-		c.JSON(200, gin.H{"ok": true, "text": res.Result.Value})
+		c.JSON(200, gin.H{"ok": true, "text": text})
 	}
 }
 
-// browserDomHandler 获取页面完整 DOM（HTML），供 AI 分析页面结构
+// browserDomHandler 获取页面完整 DOM（5秒内复用缓存）
 func browserDomHandler(m *SessionManager) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		s, ok := m.GetSession(c.Param("id"))
@@ -416,34 +398,10 @@ func browserDomHandler(m *SessionManager) gin.HandlerFunc {
 			c.JSON(404, gin.H{"error": "session not found"})
 			return
 		}
-		wsURL, err := s.pageWSURL()
+		html, err := s.getDOM()
 		if err != nil {
 			c.JSON(500, gin.H{"error": err.Error()})
 			return
-		}
-		conn, err := dialCDP(wsURL, 5*time.Second)
-		if err != nil {
-			c.JSON(500, gin.H{"error": err.Error()})
-			return
-		}
-		defer conn.Close()
-		// 先获取 DOM 字符串，截断到 8000 字符防止响应过大
-		var res struct {
-			Result struct {
-				Value string `json:"value"`
-			} `json:"result"`
-		}
-		if err := conn.Call("Runtime.evaluate", map[string]interface{}{
-			"expression":  "document.documentElement.outerHTML",
-			"returnByValue": true,
-		}, &res, 5*time.Second); err != nil {
-			c.JSON(500, gin.H{"error": err.Error()})
-			return
-		}
-		html := res.Result.Value
-		const maxLen = 8000
-		if len(html) > maxLen {
-			html = html[:maxLen] + "\n... (truncated)"
 		}
 		c.JSON(200, gin.H{"ok": true, "dom": html})
 	}

@@ -197,10 +197,23 @@ type Session struct {
 	ViewW      int
 	ViewH      int
 
-	cmd    *exec.Cmd
-	cancel context.CancelFunc
-	closed bool
-	mu     sync.Mutex
+	cmd     *exec.Cmd
+	cancel  context.CancelFunc
+	closed  bool
+	mu      sync.Mutex
+	cached  cacheEntry // 5秒内的 DOM/text 缓存，避免重复连接 Chrome
+}
+
+// cacheEntry 缓存条目
+type cacheEntry struct {
+	html      string // browser_dom 结果
+	text      string // browser_text 结果
+	pageURL   string
+	expiresAt time.Time
+}
+
+func (c *cacheEntry) isExpired() bool {
+	return time.Now().After(c.expiresAt)
 }
 
 // Info 返回公开信息
@@ -368,6 +381,88 @@ func (s *Session) pageWSURL() (string, error) {
 	return "", fmt.Errorf("no page target")
 }
 
+// getDOM 获取页面 DOM（5秒内返回缓存，避免重复连接 Chrome）
+func (s *Session) getDOM() (string, error) {
+	s.mu.Lock()
+	entry := s.cached
+	s.mu.Unlock()
+	if entry.html != "" && !entry.isExpired() {
+		return entry.html, nil
+	}
+	// 缓存未命中，连接 Chrome 获取
+	wsURL, err := s.pageWSURL()
+	if err != nil {
+		return "", err
+	}
+	conn, err := dialCDP(wsURL, 5*time.Second)
+	if err != nil {
+		return "", err
+	}
+	defer conn.Close()
+	var res struct {
+		Result struct {
+			Value string `json:"value"`
+		} `json:"result"`
+	}
+	if err := conn.Call("Runtime.evaluate", map[string]interface{}{
+		"expression":  "document.documentElement.outerHTML",
+		"returnByValue": true,
+	}, &res, 8*time.Second); err != nil {
+		return "", err
+	}
+	html := res.Result.Value
+	const maxLen = 8000
+	if len(html) > maxLen {
+		html = html[:maxLen] + "\n... (truncated)"
+	}
+	s.mu.Lock()
+	s.cached = cacheEntry{
+		html:      html,
+		pageURL:   s.CurrentURL,
+		expiresAt: time.Now().Add(5 * time.Second),
+	}
+	s.mu.Unlock()
+	return html, nil
+}
+
+// getText 获取页面可见文本（5秒内返回缓存）
+func (s *Session) getText() (string, error) {
+	s.mu.Lock()
+	entry := s.cached
+	s.mu.Unlock()
+	if entry.text != "" && !entry.isExpired() {
+		return entry.text, nil
+	}
+	wsURL, err := s.pageWSURL()
+	if err != nil {
+		return "", err
+	}
+	conn, err := dialCDP(wsURL, 5*time.Second)
+	if err != nil {
+		return "", err
+	}
+	defer conn.Close()
+	var res struct {
+		Result struct {
+			Value string `json:"value"`
+		} `json:"result"`
+	}
+	if err := conn.Call("Runtime.evaluate", map[string]interface{}{
+		"expression":  "document.body.innerText",
+		"returnByValue": true,
+	}, &res, 8*time.Second); err != nil {
+		return "", err
+	}
+	s.mu.Lock()
+	s.cached = cacheEntry{
+		text:      res.Result.Value,
+		pageURL:   s.CurrentURL,
+		expiresAt: time.Now().Add(5 * time.Second),
+	}
+	s.mu.Unlock()
+	return res.Result.Value, nil
+}
+
 // Navigate 导航到指定 URL
 func (s *Session) Navigate(targetURL string) error {
 	wsURL, err := s.pageWSURL()
@@ -390,6 +485,10 @@ func (s *Session) Navigate(targetURL string) error {
 	// 导航后注入元素 ID，方便 AI 通过 @a/@b 等点击
 	time.Sleep(500 * time.Millisecond)
 	_ = s.injectElementIds()
+	// 清除 DOM 缓存（页面已变化）
+	s.mu.Lock()
+	s.cached = cacheEntry{}
+	s.mu.Unlock()
 	return nil
 }
 

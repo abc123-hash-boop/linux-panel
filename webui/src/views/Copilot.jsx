@@ -84,7 +84,12 @@ const CopilotView = () => {
         api_base: session.api_base, api_key: '', _preset: false
       });
     }
-    if (session.model) setActiveModel(session.model);
+    // 恢复 model，如果为空则尝试从 provider 的第一个模型填充
+    if (session.model) {
+      setActiveModel(session.model);
+    } else if (activeProvider && allModels[activeProvider.id]?.length > 0) {
+      setActiveModel(allModels[activeProvider.id][0]);
+    }
   };
 
   const loadSessionMessages = async () => {
@@ -142,13 +147,16 @@ const CopilotView = () => {
     try {
       const res = await apiClient.get('/copilot/providers');
       const db = Array.isArray(res.data) ? res.data : [];
-      const merged = PRESET_PROVIDERS.map(p => {
+      const merged = PRESET_PROVIDERS.map((p, idx) => {
         const found = db.find(d => d.name === p.name);
-        return found ? { ...found, _preset: true } : { id: 0, name: p.name, icon: p.icon, api_base: p.api_base, api_key: '', _preset: true };
+        return found ? { ...found, _preset: true } : { id: -(idx + 1), name: p.name, icon: p.icon, api_base: p.api_base, api_key: '', _preset: true };
       });
-      db.filter(d => !PRESET_PROVIDERS.find(p => p.name === d.name)).forEach(d => {
-        merged.push({ ...d, _preset: false });
-      });
+      // 安全防护：确保 db 是数组
+      if (Array.isArray(db)) {
+        db.filter(d => !PRESET_PROVIDERS.find(p => p.name === d.name)).forEach(d => {
+          merged.push({ ...d, _preset: false });
+        });
+      }
       setProviders(merged);
       if (afterSave) {
         setActiveProvider(merged[merged.length - 1]);
@@ -193,6 +201,7 @@ const CopilotView = () => {
 
   const selectProvider = async (prov) => {
     setActiveProvider(prov);
+    // 只有当前没有选择模型时才自动选择第一个
     if (allModels[prov.id]?.length > 0 && !activeModel) {
       setActiveModel(allModels[prov.id][0]);
     }
@@ -209,7 +218,10 @@ const CopilotView = () => {
   };
 
   const autoNameSession = async (sid, messages) => {
-    if (!sid || !messages || messages.length < 2) return;
+    if (!sid || !Array.isArray(messages) || messages.length < 2) return;
+    // 没有模型时不自动命名
+    const model = activeModel || sessions.find(s => s.id === sid)?.model;
+    if (!model) return;
     try {
       const lastUserMsg = messages.filter(m => m.role === 'user').pop();
       if (!lastUserMsg) return;
@@ -217,7 +229,7 @@ const CopilotView = () => {
         session_id: sid,
         api_key: activeProvider?.api_key || '',
         api_base: activeProvider?.api_base || '',
-        model: activeModel || 'gpt-4o',
+        model: model,
         messages: [{ role: 'user', content: `请用中文简洁概括这个对话的主题，最多10个字，直接返回主题文字，不要加任何标点或说明。对话内容：${lastUserMsg.content}` }],
         tools: [],
         tool_choice: "none"
@@ -252,7 +264,14 @@ const CopilotView = () => {
 
     setError('');
     const session = sessions.find(s => s.id === activeSessionId);
-    const model = activeModel || session?.model || allModels[activeProvider.id]?.[0] || 'gpt-4o';
+    // 优先使用用户选择的模型，其次会话模型，最后报错
+    const model = activeModel || session?.model;
+    if (!model) {
+      setError('请先选择或输入 Model');
+      setSettingsOpen(true);
+      setLoading(false);
+      return;
+    }
 
     setMessages(prev => [...prev, { role: 'user', content: text }]);
     setInput('');
@@ -268,20 +287,51 @@ const CopilotView = () => {
         model: activeModel,
         messages: history.map(m => ({ role: m.role, content: m.content })),
         recall_sessions: recallSessions,
-        tools: [{
-          type: "function",
-          function: {
-            name: "bash",
-            description: "执行 Linux shell 命令",
-            parameters: {
-              type: "object",
-              properties: {
-                command: { type: "string", description: "要执行的命令" }
-              },
-              required: ["command"]
+        tools: [
+          {
+            type: "function",
+            function: {
+              name: "bash",
+              description: "Execute Linux shell command",
+              parameters: {
+                type: "object",
+                properties: {
+                  command: { type: "string", description: "The shell command to execute" }
+                },
+                required: ["command"]
+              }
+            }
+          },
+          {
+            type: "function",
+            function: {
+              name: "read",
+              description: "Read file content",
+              parameters: {
+                type: "object",
+                properties: {
+                  path: { type: "string", description: "Absolute path to the file" }
+                },
+                required: ["path"]
+              }
+            }
+          },
+          {
+            type: "function",
+            function: {
+              name: "write",
+              description: "Write content to file",
+              parameters: {
+                type: "object",
+                properties: {
+                  path: { type: "string", description: "Absolute path to the file" },
+                  content: { type: "string", description: "Content to write" }
+                },
+                required: ["path", "content"]
+              }
             }
           }
-        }],
+        ],
         tool_choice: "auto"
       });
       const rawReply = res.data.reply || '（无回复）';
@@ -290,8 +340,8 @@ const CopilotView = () => {
       if (res.data.tool_calls) {
         setToolCalls(prev => [...prev, ...res.data.tool_calls]);
       }
+      // 只更新会话的 model，不覆盖用户的 activeModel
       if (res.data.model) {
-        setActiveModel(res.data.model);
         setSessions(prev => prev.map(s => s.id === activeSessionId ? { ...s, model: res.data.model } : s));
       }
       const histRes = await apiClient.get(`/copilot/history?session_id=${activeSessionId}`);

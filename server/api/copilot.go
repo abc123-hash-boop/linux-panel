@@ -29,8 +29,8 @@ func modelSupportsVision(model string) bool {
 		"gpt-4o", "gpt-4-vision", "gpt-4-turbo", // OpenAI
 		"claude-3", "claude-3-opus", "claude-3-sonnet", "claude-3-haiku", // Anthropic
 		"gemini", // Google
-		"qwen-vl", "qwen2.5vl", // 阿里通义
-		"deepseek-v3", "deepseek-chat", // DeepSeek
+		"qwen-vl", "qwen2.5vl", "qwen-vl-max", // 阿里通义
+		"deepseek-vl", "deepseek-v3-vl", // DeepSeek 视觉版
 		"glm-4v", "glm-4v-plus", // 智谱
 	}
 	for _, p := range visionPatterns {

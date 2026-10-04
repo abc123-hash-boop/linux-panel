@@ -31,6 +31,7 @@ func RegisterRoutes(r *gin.Engine, manager *SessionManager) {
 		browser.POST("/sessions/:id/tools/click", browserClickToolHandler(manager))
 		browser.POST("/sessions/:id/tools/type", browserTypeToolHandler(manager))
 		browser.GET("/sessions/:id/tools/text", browserTextHandler(manager))
+		browser.GET("/sessions/:id/tools/dom", browserDomHandler(manager))
 		whipRoutes(browser, manager)
 	}
 }
@@ -337,7 +338,7 @@ func browserTypeToolHandler(m *SessionManager) gin.HandlerFunc {
 	}
 }
 
-// browserTextHandler 获取页面文本内容（用于 AI 分析页面文字）
+// browserTextHandler 获取页面文本内容
 func browserTextHandler(m *SessionManager) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		s, ok := m.GetSession(c.Param("id"))
@@ -369,5 +370,46 @@ func browserTextHandler(m *SessionManager) gin.HandlerFunc {
 			return
 		}
 		c.JSON(200, gin.H{"ok": true, "text": res.Result.Value})
+	}
+}
+
+// browserDomHandler 获取页面完整 DOM（HTML），供 AI 分析页面结构
+func browserDomHandler(m *SessionManager) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		s, ok := m.GetSession(c.Param("id"))
+		if !ok {
+			c.JSON(404, gin.H{"error": "session not found"})
+			return
+		}
+		wsURL, err := s.pageWSURL()
+		if err != nil {
+			c.JSON(500, gin.H{"error": err.Error()})
+			return
+		}
+		conn, err := dialCDP(wsURL, 5*time.Second)
+		if err != nil {
+			c.JSON(500, gin.H{"error": err.Error()})
+			return
+		}
+		defer conn.Close()
+		// 先获取 DOM 字符串，截断到 8000 字符防止响应过大
+		var res struct {
+			Result struct {
+				Value string `json:"value"`
+			} `json:"result"`
+		}
+		if err := conn.Call("Runtime.evaluate", map[string]interface{}{
+			"expression":  "document.documentElement.outerHTML",
+			"returnByValue": true,
+		}, &res, 5*time.Second); err != nil {
+			c.JSON(500, gin.H{"error": err.Error()})
+			return
+		}
+		html := res.Result.Value
+		const maxLen = 8000
+		if len(html) > maxLen {
+			html = html[:maxLen] + "\n... (truncated)"
+		}
+		c.JSON(200, gin.H{"ok": true, "dom": html})
 	}
 }

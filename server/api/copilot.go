@@ -21,26 +21,6 @@ const (
 	CopilotHistoryKey = "copilot_history"
 )
 
-// modelSupportsVision 判断模型是否支持视觉输入（图片）
-func modelSupportsVision(model string) bool {
-	m := strings.ToLower(model)
-	// 已知支持视觉的主流模型
-	visionPatterns := []string{
-		"gpt-4o", "gpt-4-vision", "gpt-4-turbo", // OpenAI
-		"claude-3", "claude-3-opus", "claude-3-sonnet", "claude-3-haiku", // Anthropic
-		"gemini", // Google
-		"qwen-vl", "qwen2.5vl", "qwen-vl-max", // 阿里通义
-		"deepseek-vl", "deepseek-v3-vl", // DeepSeek 视觉版
-		"glm-4v", "glm-4v-plus", // 智谱
-	}
-	for _, p := range visionPatterns {
-		if strings.Contains(m, p) {
-			return true
-		}
-	}
-	return false
-}
-
 // ============================================================
 // Session
 // ============================================================
@@ -417,29 +397,16 @@ func CopilotChat(c *gin.Context) {
 		}
 	}
 
-	// 构建 system prompt
+	// 构建 system prompt（统一模式：DOM + 文字交互，所有模型均可用）
 	sysContent := "You are a professional Linux server management assistant. Answer concisely and accurately."
 	sysContent += "\n\nYou can use the bash tool to execute Linux commands to get system information."
-
-	if modelSupportsVision(model) {
-		sysContent += "\n\nYou also have BROWSER TOOLS to control a headless Chrome. Use these when the user asks about websites or needs visual information:"
-		sysContent += "\n- browser_screenshot: take a screenshot of the current page (returns a JPEG image — use this for visual analysis)"
-		sysContent += "\n- browser_navigate: navigate to a URL"
-		sysContent += "\n- browser_click: click at coordinates (x, y)"
-		sysContent += "\n- browser_type: type text into the focused input field"
-		sysContent += "\n- browser_text: get the visible text content of the current page"
-		sysContent += "\n- browser_dom: get the full HTML DOM of the current page (for structural analysis)"
-		sysContent += "\n\nWhen using browser tools: navigate first, wait briefly, then screenshot or extract text. Report back what you see."
-	} else {
-		// 纯文本模型：明确说明不能使用截图
-		sysContent += "\n\nYou also have BROWSER TOOLS to control a headless Chrome. NOTE: you CANNOT see images, so do NOT call browser_screenshot (it will return unreadable base64). Use text-based tools instead:"
-		sysContent += "\n- browser_navigate: navigate to a URL"
-		sysContent += "\n- browser_click: click at coordinates (x, y)"
-		sysContent += "\n- browser_type: type text into the focused input field"
-		sysContent += "\n- browser_text: get the visible text content of the current page"
-		sysContent += "\n- browser_dom: get the full HTML DOM of the current page (for structural analysis)"
-		sysContent += "\n\nUse browser tools for text-based interaction only. After navigating or clicking, call browser_text or browser_dom to see the result."
-	}
+	sysContent += "\n\nYou also have BROWSER TOOLS to control a headless Chrome. Use these when the user asks about websites, web pages, or needs to interact with web content:"
+	sysContent += "\n- browser_navigate: navigate to a URL"
+	sysContent += "\n- browser_click: click an element at coordinates (x, y) — use this to click buttons, links, inputs"
+	sysContent += "\n- browser_type: type text into the currently focused input field"
+	sysContent += "\n- browser_text: get the visible text content of the current page"
+	sysContent += "\n- browser_dom: get the full HTML DOM of the current page — use this after navigating or clicking to see what the page looks like (link text, form fields, buttons, headings, etc.)"
+	sysContent += "\n\nBrowser workflow: navigate first, wait for the page to load, then use browser_dom or browser_text to understand the page. Use browser_click to interact with buttons/links. After clicking, call browser_dom again to see the result."
 	sysContent += "\n\nRules:"
 	sysContent += "\n1. Only call tools when necessary (e.g., check system status, execute commands)"
 	sysContent += "\n2. Do not repeatedly try different commands"

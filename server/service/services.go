@@ -51,24 +51,25 @@ func ListServices() ([]ServiceInfo, error) {
 		}
 
 
+		// systemd格式 (plain):
+		// NAME          LOAD STATE  ACTIVE    SUB STATE  DESCRIPTION
+		// accounts-d    loaded      active    running    ...
 		name := fields[0]
-
 
 		// 排除 systemd 的异常标记
 		if name == "●" {
 			continue
 		}
 
-
 		// 只保留 service
 		if !strings.HasSuffix(name, ".service") {
 			continue
 		}
 
-
-		// systemd格式:
-		// NAME LOAD ACTIVE SUB DESCRIPTION
-		status := fields[3]
+		// fields[1] = loaded state (loaded/not-found)
+		// fields[2] = active state (active/inactive) ← 前端用这个
+		// fields[3] = sub state (running/dead/exited)
+		status := fields[2]
 
 
 		enabledCmd := exec.Command(

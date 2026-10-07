@@ -10,6 +10,7 @@ import {
   LogOut, 
   Menu,
   List,
+  Server,
 } from 'lucide-react';
 import { Link, useLocation, Outlet } from 'react-router-dom';
 import { clsx } from 'clsx';
@@ -107,6 +108,12 @@ const Sidebar = ({ isOpen, setIsOpen }) => {
               icon={List} 
               label="Task Manager" 
               active={location.pathname === '/tasks'} 
+            />
+            <NavItem 
+              to="/services" 
+              icon={Server} 
+              label="Services" 
+              active={location.pathname === '/services'} 
             />
             <NavItem 
               to="/settings" 

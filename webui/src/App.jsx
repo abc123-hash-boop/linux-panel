@@ -12,6 +12,7 @@ const Copilot = lazy(() => import('./views/Copilot'));
 const Browser = lazy(() => import('./views/Browser'));
 const Settings = lazy(() => import('./views/Settings'));
 const ProcessManager = lazy(() => import('./views/ProcessManager'));
+const Services = lazy(() => import('./views/Services'));
 const Login = lazy(() => import('./views/Login'));
 
 // Loading 占位
@@ -61,6 +62,7 @@ function App() {
           <Route path="browser" element={<Browser />} />
           <Route path="settings" element={<Settings />} />
           <Route path="tasks" element={<ProcessManager />} />
+          <Route path="services" element={<Services />} />
           <Route path="*" element={<NotFound />} />
         </Route>
 

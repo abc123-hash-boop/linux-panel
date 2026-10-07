@@ -5,9 +5,11 @@ import {
   Files, 
   Terminal,
   Bot,
+  Globe,
   Settings, 
   LogOut, 
-  Menu
+  Menu,
+  List,
 } from 'lucide-react';
 import { Link, useLocation, Outlet } from 'react-router-dom';
 import { clsx } from 'clsx';
@@ -93,6 +95,18 @@ const Sidebar = ({ isOpen, setIsOpen }) => {
               icon={Bot} 
               label="Copilot" 
               active={location.pathname === '/copilot'} 
+            />
+            <NavItem 
+              to="/browser" 
+              icon={Globe} 
+              label="Browser" 
+              active={location.pathname === '/browser'} 
+            />
+            <NavItem 
+              to="/tasks" 
+              icon={List} 
+              label="Task Manager" 
+              active={location.pathname === '/tasks'} 
             />
             <NavItem 
               to="/settings" 

@@ -393,7 +393,7 @@ func main() {
 	 * ============================================================
 	 */
 
-	browser.RegisterRoutes(r, browser.DefaultManager)
+	browser.RegisterRoutes(r, browser.DefaultManager, middleware.Auth())
 
 	/*
 	 * ============================================================

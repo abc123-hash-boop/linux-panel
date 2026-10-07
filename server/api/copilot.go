@@ -8,6 +8,7 @@ import (
 	"os"
 	"net/http"
 	"os/exec"
+	"regexp"
 	"strings"
 	"time"
 
@@ -94,14 +95,44 @@ func CopilotCreateSession(c *gin.Context) {
 
 func CopilotUpdateSession(c *gin.Context) {
 	id := c.Param("id")
-	var data Session
+	var data struct {
+		Name           *string `json:"name"`
+		Model          *string `json:"model"`
+		APIBase        *string `json:"api_base"`
+		RecallSessions *string `json:"recall_sessions"`
+	}
 	if err := c.ShouldBindJSON(&data); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "bad request"})
 		return
 	}
-	_, err := database.DB.Exec(
-		"UPDATE copilot_sessions SET name=?, model=?, api_base=?, recall_sessions=? WHERE id=?",
-		data.Name, data.Model, data.APIBase, data.RecallSessions, id)
+
+	// 只更新非 nil 字段
+	sets := []string{}
+	args := []interface{}{}
+	if data.Name != nil {
+		sets = append(sets, "name=?")
+		args = append(args, *data.Name)
+	}
+	if data.Model != nil {
+		sets = append(sets, "model=?")
+		args = append(args, *data.Model)
+	}
+	if data.APIBase != nil {
+		sets = append(sets, "api_base=?")
+		args = append(args, *data.APIBase)
+	}
+	if data.RecallSessions != nil {
+		sets = append(sets, "recall_sessions=?")
+		args = append(args, *data.RecallSessions)
+	}
+
+	if len(sets) == 0 {
+		c.JSON(400, gin.H{"error": "no fields to update"})
+		return
+	}
+	args = append(args, id)
+	query := fmt.Sprintf("UPDATE copilot_sessions SET %s WHERE id=?", strings.Join(sets, ", "))
+	_, err := database.DB.Exec(query, args...)
 	if err != nil {
 		c.JSON(500, gin.H{"error": "update failed"})
 		return
@@ -324,6 +355,9 @@ type CopilotChatRequest struct {
 	Model        string   `json:"model"`
 	Messages     []gin.H  `json:"messages"`
 	MaxTokens    int      `json:"max_tokens"`
+	// Transient：为 true 时不将本次请求/回复写入 copilot_messages
+	// （用于前端自动命名会话等辅助调用，避免污染对话历史）
+	Transient bool `json:"transient"`
 	Tools        []gin.H  `json:"tools"`
 	ToolChoice   string   `json:"tool_choice"`
 }
@@ -353,7 +387,13 @@ func CopilotChat(c *gin.Context) {
 		database.DB.QueryRow("SELECT api_base FROM copilot_providers LIMIT 1").Scan(&apiBase)
 	}
 	if model == "" {
-		model = "gpt-4o"
+		// 使用请求体中携带的 model（前端会传当前选中的模型）
+		if req.Model != "" {
+			model = req.Model
+		} else {
+			c.JSON(400, gin.H{"error": "model not configured"})
+			return
+		}
 	}
 
 	// api_key 从 Provider 读取（全局）
@@ -423,6 +463,10 @@ func CopilotChat(c *gin.Context) {
 	sysContent += "\n2. Do not repeatedly try different commands"
 	sysContent += "\n3. If the user's question doesn't require querying the system, answer directly"
 	sysContent += "\n4. Reply in the same language as the user"
+	sysContent += "\n5. When the user asks for a screenshot or to see a page, you MUST call browser_screenshot (or browser_script with screenshot()) to capture it. NEVER save screenshots to files via bash. The tool returns a base64 image that is displayed to the user automatically — after calling it, just confirm in one sentence, do not describe the image file path"
+	sysContent += "\n6. When the user says '再发一遍' / '发一次' / 'show it again', re-execute the previous browser screenshot tool call, not the auto-generated session title"
+	sysContent += "\n7. If no browser page has been opened yet, first call browser_navigate to open https://www.google.com (or the URL the user gave), then call browser_screenshot. Do NOT ask the user for a URL when they simply want to see the current screen"
+	sysContent += "\nWhen you want to use a tool, call it using the tool calling mechanism provided. Do NOT output any XML or code blocks describing the tool call — just call the tool."
 	if recallContext != "" {
 		sysContent += "\n\n以下是对话历史中的相关上下文，请结合参考：\n" + recallContext
 	}
@@ -434,6 +478,14 @@ func CopilotChat(c *gin.Context) {
 	}
 
 	client := &http.Client{Timeout: 120 * time.Second}
+
+	// 收集工具调用中捕获的截图（base64 data URL），随响应直接返回前端渲染，
+	// 避免把巨大的 base64 喂给 LLM 转述
+	var capturedImages []string
+
+	// 兜底：模型把工具调用写进 content 文本而非 tool_calls 字段，
+	// 解析内嵌的 <function_call> 块，还原为标准 tool_calls 走同一套执行逻辑
+	toolCallRe := regexp.MustCompile(`(?s)<function_call>\s*<function=(\w+)>\s*(?:<parameter=\w+>(.*?)</parameter>\s*)*</function_call>`)
 
 	// 循环调用直到获得纯文本回复（处理 tool calling）
 	maxTurns := 20
@@ -490,12 +542,53 @@ func CopilotChat(c *gin.Context) {
 		}
 		json.Unmarshal(respBody, &result)
 
+		fmt.Printf("[DEBUG] LLM response: %s\n", string(respBody))
+
 		if len(result.Choices) == 0 {
 			c.JSON(200, gin.H{"reply": "（无回复）"})
 			return
 		}
 
 		choice := result.Choices[0]
+
+		// 兜底：模型把工具调用写进 content 文本（而非 tool_calls 字段）时，解析出来
+		if len(choice.Message.ToolCalls) == 0 && choice.Message.Content != "" {
+			matches := toolCallRe.FindAllStringSubmatch(choice.Message.Content, -1)
+			for _, m := range matches {
+				// 正则带 2 个捕获组（工具名、参数），不足时跳过，避免越界 panic
+				if len(m) < 3 {
+					continue
+				}
+				name := strings.TrimSpace(m[1])
+				// 未写 function=name 行时，尝试从参数行提取 "name":... 兜底
+				if name == "" {
+					var objMap map[string]interface{}
+					if json.Unmarshal([]byte(m[2]), &objMap) == nil {
+						if n, ok := objMap["name"].(string); ok {
+							name = n
+						}
+					}
+				}
+				if name == "" {
+					continue // 无法识别工具名，不执行
+				}
+				callID := "inline_" + fmt.Sprintf("%d", time.Now().UnixNano())
+				choice.Message.ToolCalls = append(choice.Message.ToolCalls, struct {
+					ID       string `json:"id"`
+					Type     string `json:"type"`
+					Function struct {
+						Name      string `json:"name"`
+						Arguments string `json:"arguments"`
+					} `json:"function"`
+				}{ID: callID, Type: "function", Function: struct {
+					Name      string `json:"name"`
+					Arguments string `json:"arguments"`
+				}{Name: name, Arguments: strings.TrimSpace(m[2])}})
+			}
+			// 去掉 content 里已解析的标记，避免复读
+			cleaned := toolCallRe.ReplaceAllString(choice.Message.Content, "")
+			choice.Message.Content = strings.TrimSpace(cleaned)
+		}
 
 		// 如果有 tool_calls，执行工具并继续调用
 		if len(choice.Message.ToolCalls) > 0 {
@@ -547,25 +640,37 @@ func CopilotChat(c *gin.Context) {
 					tc.Function.Name == "browser_click" || tc.Function.Name == "browser_type" || tc.Function.Name == "browser_text" ||
 					tc.Function.Name == "browser_dom" || tc.Function.Name == "browser_script" {
 					// 查找活跃浏览器 session（通过 API 查询）
+					// browser 路由已启用 Cookie 认证，内部自调用需转发调用者的 session Cookie
 					var sessionID string
-					listResp, err := http.Get("http://localhost:8080/browser/sessions")
-					if err == nil {
-						var sessions []struct {
-							ID     string `json:"id"`
-							Status string `json:"status"`
+					cookieHeader := func(req *http.Request) {
+						if sc, err := c.Cookie("session"); err == nil {
+							req.AddCookie(&http.Cookie{Name: "session", Value: sc})
 						}
-						json.NewDecoder(listResp.Body).Decode(&sessions)
-						listResp.Body.Close()
-						for _, s := range sessions {
-							if s.Status == "running" {
-								sessionID = s.ID
-								break
+					}
+					listReq, err := http.NewRequest("GET", "http://localhost:8080/browser/sessions", nil)
+					if err == nil {
+						cookieHeader(listReq)
+						listResp, err := http.DefaultClient.Do(listReq)
+						if err == nil {
+							var sessions []struct {
+								ID     string `json:"id"`
+								Status string `json:"status"`
+							}
+							json.NewDecoder(listResp.Body).Decode(&sessions)
+							listResp.Body.Close()
+							for _, s := range sessions {
+								if s.Status == "running" {
+									sessionID = s.ID
+									break
+								}
 							}
 						}
 					}
 					if sessionID == "" {
 						// 没有活跃 session，创建一个新的
-						createResp, err := http.Post("http://localhost:8080/browser/sessions", "application/json", nil)
+						createReq, _ := http.NewRequest("POST", "http://localhost:8080/browser/sessions", nil)
+						cookieHeader(createReq)
+						createResp, err := http.DefaultClient.Do(createReq)
 						if err != nil {
 							output = fmt.Sprintf("创建浏览器 session 失败: %v", err)
 						} else {
@@ -605,21 +710,38 @@ func CopilotChat(c *gin.Context) {
 							reqBody = nil
 						case "browser_dom":
 							reqBody = nil
+						case "browser_script":
+							var a struct{ Script string `json:"script"` }
+							json.Unmarshal([]byte(tc.Function.Arguments), &a)
+							b, _ := json.Marshal(a)
+							reqBody = bytes.NewReader(b)
 						}
 						method := "GET"
 						if reqBody != nil {
 							method = "POST"
 						}
-						url := baseURL + "/" + tc.Function.Name
-						if tc.Function.Name == "browser_screenshot" {
-							url = baseURL + "/screenshot"
-						} else if tc.Function.Name == "browser_text" {
-							url = baseURL + "/text"
-						} else if tc.Function.Name == "browser_dom" {
-							url = baseURL + "/dom"
+						// 工具名到实际 endpoint 的映射（browser 工具路由不带 browser_ 前缀）
+						var endpoint string
+						switch tc.Function.Name {
+						case "browser_screenshot":
+							endpoint = "screenshot"
+						case "browser_navigate":
+							endpoint = "navigate"
+						case "browser_click":
+							endpoint = "click"
+						case "browser_type":
+							endpoint = "type"
+						case "browser_text":
+							endpoint = "text"
+						case "browser_dom":
+							endpoint = "dom"
+						case "browser_script":
+							endpoint = "script"
 						}
+						url := baseURL + "/" + endpoint
 						req, _ := http.NewRequest(method, url, reqBody)
 						req.Header.Set("Content-Type", "application/json")
+						cookieHeader(req)
 						httpClient := &http.Client{Timeout: 15 * time.Second}
 						resp2, err := httpClient.Do(req)
 						if err != nil {
@@ -628,14 +750,24 @@ func CopilotChat(c *gin.Context) {
 							var result map[string]interface{}
 							json.NewDecoder(resp2.Body).Decode(&result)
 							resp2.Body.Close()
-							if tc.Function.Name == "browser_screenshot" {
-								img := result["image"].(string)
-								u := result["url"].(string)
-								output = fmt.Sprintf("页面截图 (当前: %s)\n![screenshot](%s)", u, img)
+							if errVal, hasErr := result["error"]; hasErr {
+								output = fmt.Sprintf("浏览器工具调用失败: %v", errVal)
+							} else if tc.Function.Name == "browser_screenshot" {
+								img, _ := result["image"].(string)
+								u, _ := result["url"].(string)
+								if img == "" {
+									output = "截图失败：未获取到图片数据"
+								} else {
+									capturedImages = append(capturedImages, img)
+									// 不喂给 LLM 的 base64（太大），只告知已截图并展示给用户
+									output = fmt.Sprintf("页面截图已获取 (当前: %s)，图片已自动展示给用户，你只需一句话确认即可", u)
+								}
 							} else if tc.Function.Name == "browser_text" {
-								output = fmt.Sprintf("页面文本:\n%s", result["text"])
+								t, _ := result["text"].(string)
+								output = fmt.Sprintf("页面文本:\n%s", t)
 							} else if tc.Function.Name == "browser_dom" {
-								output = fmt.Sprintf("页面 DOM:\n%s", result["dom"])
+								d, _ := result["dom"].(string)
+								output = fmt.Sprintf("页面 DOM:\n%s", d)
 							} else if tc.Function.Name == "browser_script" {
 								// 脚本结果是一个步骤数组
 								if steps, ok := result["results"].([]interface{}); ok {
@@ -664,6 +796,12 @@ func CopilotChat(c *gin.Context) {
 													t = t[:200] + "...(truncated)"
 												}
 												msg += fmt.Sprintf("\n        Text: %s", t)
+											}
+											if img, hasImg := m["image"]; hasImg {
+												if s, ok := img.(string); ok && s != "" {
+													capturedImages = append(capturedImages, s)
+												}
+												msg += " (图片已自动展示给用户)"
 											}
 											lines = append(lines, msg)
 										}
@@ -697,14 +835,23 @@ func CopilotChat(c *gin.Context) {
 		reply = strings.ReplaceAll(reply, "<|end|>", "")
 		reply = strings.TrimSpace(reply)
 
-		// 保存对话到数据库
+		// 保存对话到数据库（transient 请求如自动命名不入库，避免污染历史）
+		if !req.Transient {
+			tx, _ := database.DB.Begin()
+			tx.Exec("INSERT INTO copilot_messages(session_id, role, content) VALUES(?, ?, ?)", req.SessionID, "user", req.Messages[len(req.Messages)-1]["content"])
+			tx.Exec("INSERT INTO copilot_messages(session_id, role, content) VALUES(?, ?, ?)", req.SessionID, "assistant", reply)
+			tx.Commit()
+		}
 		tx, _ := database.DB.Begin()
-		tx.Exec("INSERT INTO copilot_messages(session_id, role, content) VALUES(?, ?, ?)", req.SessionID, "user", req.Messages[len(req.Messages)-1]["content"])
-		tx.Exec("INSERT INTO copilot_messages(session_id, role, content) VALUES(?, ?, ?)", req.SessionID, "assistant", reply)
 		tx.Exec("UPDATE copilot_sessions SET model=? WHERE id=?", model, req.SessionID)
 		tx.Commit()
 
-		c.JSON(200, gin.H{"reply": reply, "model": model})
+		// 返回截图列表随响应（前端直接渲染，LLM 不需要转述图片）
+		if len(capturedImages) > 0 {
+			c.JSON(200, gin.H{"reply": reply, "model": model, "images": capturedImages})
+		} else {
+			c.JSON(200, gin.H{"reply": reply, "model": model})
+		}
 		return
 	}
 

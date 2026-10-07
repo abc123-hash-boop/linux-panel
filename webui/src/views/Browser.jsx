@@ -119,6 +119,7 @@ const BrowserView = () => {
       method: 'POST',
       headers: { 'Content-Type': 'application/sdp' },
       body: pc.localDescription.sdp,
+      credentials: 'include',
     });
     if (!resp.ok) throw new Error(`WHIP 失败: HTTP ${resp.status}`);
     const answer = await resp.text();
@@ -163,14 +164,14 @@ const BrowserView = () => {
 
     (async () => {
       try {
-        const resp = await fetch('/browser/sessions', { method: 'POST' });
+        const resp = await fetch('/browser/sessions', { method: 'POST', credentials: 'include' });
         if (!resp.ok) {
           const e = await resp.json().catch(() => ({}));
           throw new Error(e.error || `创建会话失败: HTTP ${resp.status}`);
         }
         const sess = await resp.json();
         if (disposed) {
-          fetch(`/browser/sessions/${sess.id}`, { method: 'DELETE' });
+          fetch(`/browser/sessions/${sess.id}`, { method: 'DELETE', credentials: 'include' });
           return;
         }
         sessionRef.current = sess.id;
@@ -198,7 +199,7 @@ const BrowserView = () => {
       const sid = sessionRef.current;
       if (sid) {
         // 组件卸载时关闭 Chrome，避免残留进程
-        fetch(`/browser/sessions/${sid}`, { method: 'DELETE', keepalive: true });
+        fetch(`/browser/sessions/${sid}`, { method: 'DELETE', keepalive: true, credentials: 'include' });
       }
     };
   }, [startStream, startInput]);
@@ -209,7 +210,7 @@ const BrowserView = () => {
     if (!sessionId || status !== 'streaming') return;
     const poll = async () => {
       try {
-        const resp = await fetch(`/browser/sessions/${sessionId}/info`);
+        const resp = await fetch(`/browser/sessions/${sessionId}/info`, { credentials: 'include' });
         if (!resp.ok) return;
         const info = await resp.json();
         if (info.url && info.url !== currentUrl) {
@@ -281,6 +282,7 @@ const BrowserView = () => {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ url: target }),
+        credentials: 'include',
       });
       if (!resp.ok) {
         const e = await resp.json().catch(() => ({}));
@@ -302,6 +304,7 @@ const BrowserView = () => {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ url: currentUrl }),
+        credentials: 'include',
       });
     }
   };

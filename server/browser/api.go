@@ -13,9 +13,13 @@ import (
 	gorilla "github.com/gorilla/websocket"
 )
 
-// RegisterRoutes 注册浏览器路由
-func RegisterRoutes(r *gin.Engine, manager *SessionManager) {
-	browser := r.Group("/browser")
+// RegisterRoutes 注册浏览器路由（authMW 为 nil 时不启用认证）
+func RegisterRoutes(r *gin.Engine, manager *SessionManager, authMW ...gin.HandlerFunc) {
+	var mw []gin.HandlerFunc
+	if len(authMW) > 0 {
+		mw = append(mw, authMW[0])
+	}
+	browser := r.Group("/browser", mw...)
 	{
 		browser.GET("/sessions", listSessionsHandler(manager))
 		browser.POST("/sessions", createSessionHandler(manager))

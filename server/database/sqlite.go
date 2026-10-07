@@ -69,6 +69,8 @@ func createTable() {
 
 		api_base TEXT DEFAULT 'https://api.openai.com/v1',
 
+		recall_sessions TEXT DEFAULT '{}',
+
 		created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 
 	);
@@ -120,6 +122,9 @@ func createTable() {
 		log.Fatal(err)
 
 	}
+
+	// 迁移：为旧数据库补充 recall_sessions 列
+	DB.Exec("ALTER TABLE copilot_sessions ADD COLUMN recall_sessions TEXT DEFAULT '{}'")
 
 }
 

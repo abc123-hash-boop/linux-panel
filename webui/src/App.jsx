@@ -9,7 +9,9 @@ const Docker = lazy(() => import('./views/Docker'));
 const Files = lazy(() => import('./views/Files'));
 const Terminal = lazy(() => import('./views/Terminal'));
 const Copilot = lazy(() => import('./views/Copilot'));
+const Browser = lazy(() => import('./views/Browser'));
 const Settings = lazy(() => import('./views/Settings'));
+const ProcessManager = lazy(() => import('./views/ProcessManager'));
 const Login = lazy(() => import('./views/Login'));
 
 // Loading 占位
@@ -56,7 +58,9 @@ function App() {
           <Route path="files" element={<Files />} />
           <Route path="terminal" element={<Terminal />} />
           <Route path="copilot" element={<Copilot />} />
+          <Route path="browser" element={<Browser />} />
           <Route path="settings" element={<Settings />} />
+          <Route path="tasks" element={<ProcessManager />} />
           <Route path="*" element={<NotFound />} />
         </Route>
 

@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import apiClient from '../api/client';
+import { marked } from 'marked';
 import { Send, Bot, User, Sparkles, Settings, MessageSquare, Loader2, Plus, Trash2, ArrowLeftRight } from 'lucide-react';
 
 const PRESET_PROVIDERS = [
@@ -13,6 +14,9 @@ const PRESET_PROVIDERS = [
 ];
 
 const MAX_CONTEXT_TOKENS = 8000;
+
+// 配置 marked：启用 GFM（表格/任务列表/删除线）与换行
+marked.setOptions({ gfm: true, breaks: true });
 
 const CopilotView = () => {
   const [sessions, setSessions] = useState([]);
@@ -232,7 +236,8 @@ const CopilotView = () => {
         model: model,
         messages: [{ role: 'user', content: `请用中文简洁概括这个对话的主题，最多10个字，直接返回主题文字，不要加任何标点或说明。对话内容：${lastUserMsg.content}` }],
         tools: [],
-        tool_choice: "none"
+        tool_choice: "none",
+        transient: true   // 不写入 copilot_messages，避免污染对话历史
       });
       const name = (res.data.reply || '新对话').trim().slice(0, 20);
       if (name && name !== '新对话') {
@@ -330,13 +335,103 @@ const CopilotView = () => {
                 required: ["path", "content"]
               }
             }
+          },
+          {
+            type: "function",
+            function: {
+              name: "browser_navigate",
+              description: "Navigate browser to a URL",
+              parameters: {
+                type: "object",
+                properties: {
+                  url: { type: "string", description: "URL to navigate to" }
+                },
+                required: ["url"]
+              }
+            }
+          },
+          {
+            type: "function",
+            function: {
+              name: "browser_click",
+              description: "Click element at x,y coordinates",
+              parameters: {
+                type: "object",
+                properties: {
+                  x: { type: "number", description: "X coordinate" },
+                  y: { type: "number", description: "Y coordinate" }
+                },
+                required: ["x", "y"]
+              }
+            }
+          },
+          {
+            type: "function",
+            function: {
+              name: "browser_type",
+              description: "Type text into focused field",
+              parameters: {
+                type: "object",
+                properties: {
+                  text: { type: "string", description: "Text to type" }
+                },
+                required: ["text"]
+              }
+            }
+          },
+          {
+            type: "function",
+            function: {
+              name: "browser_text",
+              description: "Get visible text content of current page",
+              parameters: { type: "object", properties: {} }
+            }
+          },
+          {
+            type: "function",
+            function: {
+              name: "browser_dom",
+              description: "Get full HTML DOM of current page",
+              parameters: { type: "object", properties: {} }
+            }
+          },
+          {
+            type: "function",
+            function: {
+              name: "browser_screenshot",
+              description: "Take a screenshot of current page (returns base64 image)",
+              parameters: { type: "object", properties: {} }
+            }
+          },
+          {
+            type: "function",
+            function: {
+              name: "browser_script",
+              description: "Execute a multi-step browser script. Format: one command per line. Supported: open(url), click('x,y' or '@id'), type(text), dom(), text(), screenshot(), wait(ms), back(), reload()",
+              parameters: {
+                type: "object",
+                properties: {
+                  script: { type: "string", description: "Multi-line browser script" }
+                },
+                required: ["script"]
+              }
+            }
           }
         ],
         tool_choice: "auto"
       });
       const rawReply = res.data.reply || '（无回复）';
-      const reply = typeof rawReply === 'string' ? rawReply.replace(/[<|][a-z_|]+[>|]|\n/g, ' ').trim() : rawReply;
-      setMessages(prev => [...prev, { role: 'assistant', content: reply }]);
+      // 只清理 LLM 控制标记（如 <|assistant|>），保留换行与 markdown 语法（含图片）
+      const reply = typeof rawReply === 'string'
+        ? rawReply.replace(/<\|[\w]+\|>/g, '').trim()
+        : rawReply;
+      // 拼接回复与本次捕获的截图（images 为 base64 data URL 数组，来自 browser 工具）
+      let content = reply;
+      if (Array.isArray(res.data.images) && res.data.images.length > 0) {
+        const imgMd = res.data.images.map(u => `![screenshot](${u})`).join('\n');
+        content = (content ? content + '\n' : '') + imgMd;
+      }
+      setMessages(prev => [...prev, { role: 'assistant', content }]);
       if (res.data.tool_calls) {
         setToolCalls(prev => [...prev, ...res.data.tool_calls]);
       }
@@ -458,16 +553,27 @@ const CopilotView = () => {
               <p className="text-xs text-gray-300">点击右上角 ⚙️ 选择 Provider</p>
             </div>
           )}
-          {messages.map((msg, i) => (
-            <div key={i} className={`flex gap-3 ${msg.role === 'user' ? 'flex-row-reverse' : ''}`}>
-              <div className={`w-7 h-7 rounded-full flex items-center justify-center shrink-0 ${msg.role === 'user' ? 'bg-blue-500 text-white' : 'bg-violet-500 text-white'}`}>
-                {msg.role === 'user' ? <User size={14} /> : <Bot size={14} />}
+          {messages.map((msg, i) => {
+            const isAssistant = msg.role === 'assistant';
+            // 助手消息渲染 markdown；用户消息保留纯文本
+            return (
+            <div key={i} className={`flex gap-3 ${isAssistant ? '' : 'flex-row-reverse'}`}>
+              <div className={`w-7 h-7 rounded-full flex items-center justify-center shrink-0 ${isAssistant ? 'bg-violet-500 text-white' : 'bg-blue-500 text-white'}`}>
+                {isAssistant ? <Bot size={14} /> : <User size={14} />}
               </div>
-              <div className={`max-w-[80%] px-4 py-2.5 rounded-2xl text-sm whitespace-pre-wrap ${msg.role === 'user' ? 'bg-blue-500 text-white rounded-tr-sm' : 'bg-gray-100 text-gray-800 rounded-tl-sm'}`}>
-                {msg.content}
+              <div className={`max-w-[80%] px-4 py-2.5 rounded-2xl text-sm ${isAssistant ? 'bg-gray-100 text-gray-800 rounded-tl-sm markdown-body' : 'bg-blue-500 text-white rounded-tr-sm whitespace-pre-wrap'}`}>
+                {isAssistant ? (
+                  <div
+                    className="markdown-body"
+                    dangerouslySetInnerHTML={{ __html: marked.parse(msg.content || '') }}
+                  />
+                ) : (
+                  msg.content
+                )}
               </div>
             </div>
-          ))}
+            );
+          })}
           {toolCalls.length > 0 && (
             <div className="px-4 py-2 bg-blue-50 border border-blue-200 rounded-lg">
               <div className="text-xs font-medium text-blue-700 mb-1">工具调用</div>

@@ -1,0 +1,54 @@
+{
+  "version": 1,
+  "updatedAt": "2026-10-28",
+  "articles": [
+    {
+      "title": "CVE-2026-99999 高危 · 内核 IPv4 校验和缺陷",
+      "subtitle": "CVSS 9.3（CRITICAL）· ipv4: validate checksum_start before completing checksum，畸形包可破坏网络头部",
+      "url": "https://nvd.nist.gov/vuln/detail/CVE-2026-99999",
+      "importance": 10
+    },
+    {
+      "title": "CVE-2026-99216 高危 · 虚拟化 VMBus 连接状态复位缺失",
+      "subtitle": "CVSS 8.4（HIGH）· Drivers: hv: 错误/退出路径未复位 VMBus 连接状态，Hyper-V 宿主机可受影响",
+      "url": "https://nvd.nist.gov/vuln/detail/CVE-2026-99216",
+      "importance": 9
+    },
+    {
+      "title": "CVE-2026-99213 高危 · vsock TCP_CLOSING 状态误处理",
+      "subtitle": "CVSS 7.8（HIGH）· vsock: treat TCP_CLOSING as once-established，TCP 连接关闭处理缺陷",
+      "url": "https://nvd.nist.gov/vuln/detail/CVE-2026-99213",
+      "importance": 7
+    },
+    {
+      "title": "CVE-2026-99211 警告 · netlink socket filter skb 头部重置",
+      "subtitle": "netlink: reset skb headers before unicast and multicast filtering，socket filter 可滥用 SKF_NET_OFF / SKF_LL_OFFSET",
+      "url": "https://nvd.nist.gov/vuln/detail/CVE-2026-99211",
+      "importance": 5
+    },
+    {
+      "title": "CVE-2026-99215 提示 · 电源供给回调竞态",
+      "subtitle": "power: supply: core: prevent unregistering a power supply while a callback runs，回调运行期间注销触发竞态",
+      "url": "https://nvd.nist.gov/vuln/detail/CVE-2026-99215",
+      "importance": 4
+    },
+    {
+      "title": "CVE-2026-99214 提示 · DRM VC4 HDMI 音频时序",
+      "subtitle": "drm/vc4: hdmi: Move packet RAM enable to PM runtime，HPD 处理器可在视频未恢复前触发音频",
+      "url": "https://nvd.nist.gov/vuln/detail/CVE-2026-99214",
+      "importance": 3
+    },
+    {
+      "title": "CVE-2026-99209 提示 · DRM XE BO 驱逐逻辑缺陷",
+      "subtitle": "drm/xe: skip eviction of a BO with no resource，xe_evict_flags() 对无资源 BO 处理异常",
+      "url": "https://nvd.nist.gov/vuln/detail/CVE-2026-99209",
+      "importance": 2
+    },
+    {
+      "title": "CVE-2026-99210 提示 · 加速器 rocket 初始化失败未清理",
+      "subtitle": "accel/rocket: clear rdev on device init failure，rocket_probe() 未清理 rdev 残留",
+      "url": "https://nvd.nist.gov/vuln/detail/CVE-2026-99210",
+      "importance": 1
+    }
+  ]
+}

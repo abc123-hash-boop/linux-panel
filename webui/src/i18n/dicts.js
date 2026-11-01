@@ -9,6 +9,7 @@ export const dicts = {
       browser: '浏览器',
       tasks: '任务管理器',
       services: '服务',
+      news: '新闻',
       settings: '设置',
       logout: '登出',
     },
@@ -277,6 +278,23 @@ export const dicts = {
         confirm: '确定终止进程 "{name}" (PID {pid})？',
       },
     },
+    news: {
+      title: '新闻与通告',
+      subtitle: '系统安全通告与重要事件 · 按重要性排序',
+      updated: '更新',
+      importance: '重要性',
+      empty: '暂无新闻',
+      error: '加载新闻失败',
+      retry: '重试',
+      filter: {
+        all: '全部',
+      },
+      tier: {
+        high: '高危',
+        warn: '警告',
+        info: '提示',
+      },
+    },
   },
   en: {
     nav: {
@@ -288,6 +306,7 @@ export const dicts = {
       browser: 'Browser',
       tasks: 'Task Manager',
       services: 'Services',
+      news: 'News',
       settings: 'Settings',
       logout: 'Logout',
     },
@@ -572,6 +591,23 @@ export const dicts = {
         button: 'Kill',
         'button.title': 'Kill process',
         confirm: 'Kill process "{name}" (PID {pid})?',
+      },
+    },
+    news: {
+      title: 'News & Announcements',
+      subtitle: 'Security advisories & notable events · sorted by importance',
+      updated: 'Updated',
+      importance: 'Importance',
+      empty: 'No news yet',
+      error: 'Failed to load news',
+      retry: 'Retry',
+      filter: {
+        all: 'All',
+      },
+      tier: {
+        high: 'Critical',
+        warn: 'Warning',
+        info: 'Info',
       },
     },
   }

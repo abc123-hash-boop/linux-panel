@@ -113,6 +113,10 @@ func main() {
 			panelApi.NginxSitesHandler,
 		)
 		protected.POST(
+			"/sites/nginx/site/create",
+			panelApi.NginxCreateSite,
+		)
+		protected.POST(
 			"/sites/nginx/site/:name/:action",
 			panelApi.NginxSiteAction,
 		)

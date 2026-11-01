@@ -70,13 +70,12 @@ func NginxStatus() NginxInfo {
 }
 
 func NginxSites() []NginxSite {
-	var sites []NginxSite
+	sites := []NginxSite{}
 
 	// sites-available
 	availDir := "/etc/nginx/sites-available"
 	enabledDir := "/etc/nginx/sites-enabled"
 
-	// 列出 available
 	entries, _ := os.ReadDir(availDir)
 	for _, e := range entries {
 		if e.IsDir() {
@@ -105,7 +104,6 @@ func NginxSites() []NginxSite {
 		if !strings.HasSuffix(name, ".conf") {
 			continue
 		}
-		// conf.d 里的都算 enabled
 		sites = append(sites, NginxSite{
 			Name:    name,
 			Path:    filepath.Join(confDir, name),
@@ -170,6 +168,39 @@ func NginxAction(action string) error {
 		_ = cmds
 	}
 	return nil
+}
+
+func NginxCreateSite(name, content string) error {
+	if name == "" || !strings.HasSuffix(name, ".conf") {
+		name = name + ".conf"
+	}
+	availDir := "/etc/nginx/sites-available"
+	enabledDir := "/etc/nginx/sites-enabled"
+
+	// 确保持有目录
+	_ = os.MkdirAll(availDir, 0755)
+	_ = os.MkdirAll(enabledDir, 0755)
+
+	filePath := filepath.Join(availDir, name)
+	if err := os.WriteFile(filePath, []byte(content), 0644); err != nil {
+		return err
+	}
+
+	// 自动软链到 sites-enabled
+	symlinkPath := filepath.Join(enabledDir, name)
+	if _, err := os.Lstat(symlinkPath); err != nil {
+		_ = os.Symlink(filePath, symlinkPath)
+	}
+
+	// 校验配置
+	if out, err := exec.Command(nginxBin(), "-t").CombinedOutput(); err != nil {
+		// 配置错误，回滚删除并返回错误
+		_ = os.Remove(filePath)
+		_ = os.Remove(symlinkPath)
+		return errString("nginx config test failed:\n" + string(out))
+	}
+
+	return NginxReload()
 }
 
 func NginxReload() error {

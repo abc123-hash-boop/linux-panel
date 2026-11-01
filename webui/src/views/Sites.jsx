@@ -32,23 +32,32 @@ function fmtBytes(n) {
 // ---------- Nginx Tab ----------
 function NginxTab() {
   const { t } = useI18n();
-  const [status, setStatus] = useState(null);
-  const [sites, setSites] = useState([]);
-  const [busy, setBusy] = useState(null); // {site, action}
-  const [actionMsg, setActionMsg] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const [showCreate, setShowCreate] = useState(false);
+  const [newSiteName, setNewSiteName] = useState('');
+  const [newSiteContent, setNewSiteContent] = useState(`server {
+    listen 80;
+    server_name example.com;
+
+    location / {
+        root /var/www/html;
+        index index.html index.htm;
+    }
+}`);
+  const [createErr, setCreateErr] = useState(null);
 
   const fetchAll = async () => {
     try {
       setLoading(true);
-      const [s, st] = await Promise.all([
-        apiClient.get('/sites/nginx/sites'),
+      const [st, s] = await Promise.all([
         apiClient.get('/sites/nginx'),
+        apiClient.get('/sites/nginx/sites'),
       ]);
-      setSites(st.data || []);
-      setStatus(s.data);
+      setStatus(st.data || {});
+      setSites(s.data || []);
     } catch (e) {
       console.error('nginx fetch failed:', e);
+      setStatus({});
+      setSites([]);
     } finally {
       setLoading(false);
     }
@@ -156,10 +165,68 @@ function NginxTab() {
             {t('sites.nginx.sites', '站点')}
             <span className="text-xs text-white/40 font-normal">{sites.length}</span>
           </h3>
-          <button onClick={fetchAll} className="glass-btn p-1.5 rounded-lg text-white/60 hover:text-white">
-            <RefreshCw size={14} className={cn(loading && 'animate-spin')} />
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => { setShowCreate(!showCreate); setCreateErr(null); }}
+              className="glass-btn px-3 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1.5 text-violet-300"
+            >
+              + {t('sites.nginx.createSite', '新建站点')}
+            </button>
+            <button onClick={fetchAll} className="glass-btn p-1.5 rounded-lg text-white/60 hover:text-white">
+              <RefreshCw size={14} className={cn(loading && 'animate-spin')} />
+            </button>
+          </div>
         </div>
+
+        {/* 新建站点弹窗/面板 */}
+        {showCreate && (
+          <div className="mb-5 glass-input p-4 rounded-xl space-y-3 animate-fade-in border border-violet-500/30">
+            <h4 className="text-sm font-semibold text-white">{t('sites.nginx.createSite', '新建 Nginx 站点')}</h4>
+            <div>
+              <label className="text-xs text-white/60 block mb-1">{t('sites.nginx.siteName', '站点配置文件名 (如 myapp.conf)')}</label>
+              <input
+                type="text"
+                value={newSiteName}
+                onChange={(e) => setNewSiteName(e.target.value)}
+                placeholder="myapp.conf"
+                className="glass-input w-full px-3 py-2 rounded-lg text-sm outline-none"
+              />
+            </div>
+            <div>
+              <label className="text-xs text-white/60 block mb-1">{t('sites.nginx.siteContent', 'Nginx 配置内容')}</label>
+              <textarea
+                value={newSiteContent}
+                onChange={(e) => setNewSiteContent(e.target.value)}
+                rows={8}
+                spellCheck={false}
+                className="glass-input w-full px-3 py-2 rounded-lg text-xs font-mono outline-none resize-y"
+              />
+            </div>
+            {createErr && <p className="text-xs text-red-300">{createErr}</p>}
+            <div className="flex justify-end gap-2">
+              <button onClick={() => setShowCreate(false)} className="glass-btn px-3 py-1.5 rounded-lg text-xs text-white/70">
+                {t('sites.cancel', '取消')}
+              </button>
+              <button
+                onClick={async () => {
+                  if (!newSiteName.trim()) { setCreateErr('Filename required'); return; }
+                  try {
+                    setCreateErr(null);
+                    await apiClient.post('/sites/nginx/site/create', { name: newSiteName, content: newSiteContent });
+                    setShowCreate(false);
+                    setNewSiteName('');
+                    fetchAll();
+                  } catch (e) {
+                    setCreateErr(e.response?.data?.error || String(e));
+                  }
+                }}
+                className="glass-btn-primary px-4 py-1.5 rounded-lg text-xs font-medium"
+              >
+                {t('sites.saveCreate', '创建并重载')}
+              </button>
+            </div>
+          </div>
+        )}
 
         {sites.length === 0 ? (
           <p className="text-sm text-white/40 text-center py-6">

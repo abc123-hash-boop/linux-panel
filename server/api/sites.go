@@ -18,7 +18,29 @@ func NginxSitesHandler(c *gin.Context) {
 	c.JSON(http.StatusOK, service.NginxSites())
 }
 
-// NginxSiteAction POST /api/sites/nginx/site/:name/:action
+// NginxCreateSite POST /api/sites/nginx/site/create
+func NginxCreateSite(c *gin.Context) {
+	var req struct {
+		Name    string `json:"name"`
+		Content string `json:"content"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if req.Name == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "site name required"})
+		return
+	}
+
+	if err := service.NginxCreateSite(req.Name, req.Content); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"success": true})
+}
+
 func NginxSiteAction(c *gin.Context) {
 	name := c.Param("name")
 	action := c.Param("action")

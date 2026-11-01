@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -397,9 +398,18 @@ func main() {
 
 	/*
 	 * ============================================================
-	 * 静态资源
+	 * 静态资源（禁用缓存，强制浏览器每次都验证新 bundle）
 	 * ============================================================
 	 */
+
+	r.Use(func(c *gin.Context) {
+		if strings.HasPrefix(c.Request.URL.Path, "/assets/") {
+			c.Header("Cache-Control", "no-cache, no-store, must-revalidate")
+			c.Header("Pragma", "no-cache")
+			c.Header("Expires", "0")
+		}
+		c.Next()
+	})
 
 	r.Static(
 		"/assets",

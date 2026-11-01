@@ -1,35 +1,39 @@
 # Go
 server/panel
+server/bin/
 
 # Go build
 *.exe
 *.out
 
-
 # Node
 frontend/node_modules/
-
+webui/node_modules/
 frontend/dist/
 
+# Browser session persistence
+server/browser/persist/
+
+# Chrome installer (large binary)
+server/google-chrome-stable_current_amd64.deb
 
 # IDE
 .vscode/
 .idea/
 
-
 # logs
 *.log
-
 
 # database
 *.db
 *.sqlite
 
-
 # environment
 .env
-
 
 # OS
 .DS_Store
 Thumbs.db
+
+# session-local notes
+*_TODO.md

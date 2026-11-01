@@ -80,6 +80,9 @@ func DockerExecTerminal(
 				"/bin/bash",
 			},
 
+			// 让容器里的 bash 也通过 OSC 0 上报真实窗口标题
+			Env: TerminalEnv(nil),
+
 			AttachStdin: true,
 
 			AttachStdout: true,

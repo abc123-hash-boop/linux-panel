@@ -28,18 +28,18 @@ const StatsBar = ({ services }) => {
         { label: 'Failed', value: failed, icon: AlertCircle, color: 'red' },
         { label: 'Stopped', value: inactive, icon: Square, color: 'gray' },
       ].map(s => (
-        <div key={s.label} className="bg-white p-3 rounded-xl shadow-sm border border-gray-100 flex items-center gap-3">
+        <div key={s.label} className="glass-strong rounded-2xl border border-white/10 flex items-center gap-3">
           <div className={cn("w-9 h-9 rounded-lg flex items-center justify-center shrink-0",
             s.color === 'blue' ? 'bg-blue-100 text-blue-600' :
             s.color === 'green' ? 'bg-green-100 text-green-600' :
             s.color === 'red' ? 'bg-red-100 text-red-600' :
-            'bg-gray-100 text-gray-500'
+            'bg-white/10 text-white/50'
           )}>
             <s.icon size={18} />
           </div>
           <div>
-            <p className="text-xs text-gray-500 font-medium">{s.label}</p>
-            <p className="text-lg font-bold text-gray-800 leading-none">{s.value}</p>
+            <p className="text-xs text-white/50 font-medium">{s.label}</p>
+            <p className="text-lg font-bold text-white leading-none">{s.value}</p>
           </div>
         </div>
       ))}
@@ -67,11 +67,11 @@ const ServiceRow = ({ service, onAction }) => {
 
   const statusColor = isRunning ? 'bg-green-100 text-green-700' :
                      isFailed ? 'bg-red-100 text-red-700' :
-                     'bg-gray-100 text-gray-500';
+                     'bg-white/10 text-white/50';
   const statusLabel = isRunning ? 'running' : isFailed ? 'failed' : service.status || 'inactive';
 
   return (
-    <tr className={cn("hover:bg-gray-50 transition-colors group border-b border-gray-50 last:border-0",
+    <tr className={cn("hover:bg-white/5 transition-colors group border-b border-gray-50 last:border-0",
       isFailed && "bg-red-50/50"
     )}>
       <td className="px-5 py-3">
@@ -79,7 +79,7 @@ const ServiceRow = ({ service, onAction }) => {
           <div className={cn("w-2 h-2 rounded-full",
             isRunning ? 'bg-green-500' : isFailed ? 'bg-red-500' : 'bg-gray-300'
           )} />
-          <span className="font-mono text-sm text-gray-800 max-w-[240px] truncate" title={service.name}>
+          <span className="font-mono text-sm text-white max-w-[240px] truncate" title={service.name}>
             {service.name}
           </span>
         </div>
@@ -92,7 +92,7 @@ const ServiceRow = ({ service, onAction }) => {
       <td className="px-5 py-3">
         <span className={cn("inline-flex px-2 py-0.5 rounded-full text-xs font-medium",
           service.enabled === 'enabled' ? 'bg-blue-100 text-blue-700' :
-          service.enabled === 'disabled' ? 'bg-gray-100 text-gray-500' :
+          service.enabled === 'disabled' ? 'bg-white/10 text-white/50' :
           'bg-yellow-100 text-yellow-700'
         )}>
           {service.enabled || '-'}
@@ -185,11 +185,11 @@ const ServicesView = () => {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h1 className="text-xl font-bold text-gray-800">Services</h1>
+        <h1 className="text-xl font-bold text-white">Services</h1>
         <button
           onClick={fetchServices}
           disabled={refreshing}
-          className="inline-flex items-center gap-2 px-3 py-2 bg-white border border-gray-200 rounded-lg text-sm text-gray-600 hover:bg-gray-50 transition-colors disabled:opacity-50"
+          className="inline-flex items-center gap-2 px-3 py-2 bg-white border border-white/10 rounded-lg text-sm text-white/70 hover:bg-white/5 transition-colors disabled:opacity-50"
         >
           <RotateCw size={14} className={refreshing ? 'animate-spin' : ''} />
           Refresh
@@ -201,16 +201,16 @@ const ServicesView = () => {
       {/* Controls */}
       <div className="flex flex-col sm:flex-row gap-3">
         <div className="relative flex-1">
-          <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+          <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-white/40" />
           <input
             type="text"
             value={search}
             onChange={e => setSearch(e.target.value)}
             placeholder="Search services…"
-            className="w-full pl-9 pr-4 py-2.5 bg-white border border-gray-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            className="w-full pl-9 pr-4 py-2.5 bg-white border border-white/10 rounded-xl text-sm outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
           />
         </div>
-        <div className="flex gap-1 bg-white border border-gray-200 rounded-xl p-1">
+        <div className="flex gap-1 bg-white border border-white/10 rounded-xl p-1">
           {[
             { key: 'all', label: 'All' },
             { key: 'active', label: 'Running' },
@@ -222,7 +222,7 @@ const ServicesView = () => {
               className={cn("px-3 py-1.5 text-xs font-medium rounded-lg transition-colors",
                 filter === f.key
                   ? "bg-blue-600 text-white"
-                  : "text-gray-500 hover:bg-gray-100"
+                  : "text-white/50 hover:bg-white/10"
               )}
             >
               {f.label}
@@ -232,7 +232,7 @@ const ServicesView = () => {
       </div>
 
       {/* Table */}
-      <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+      <div className="glass rounded-xl border border-white/10 overflow-hidden">
         {error && (
           <div className="bg-red-50 border-b border-red-100 px-5 py-3 flex items-center gap-2 text-red-600 text-sm">
             <AlertCircle size={16} />
@@ -242,18 +242,18 @@ const ServicesView = () => {
         )}
         <div className="overflow-x-auto">
           <table className="w-full text-left min-w-[500px]">
-            <thead className="bg-gray-50 border-b border-gray-100">
+            <thead className="bg-white/5 border-b border-white/8">
               <tr>
-                <th className="px-5 py-3 text-xs font-bold text-gray-500 uppercase">Service</th>
-                <th className="px-5 py-3 text-xs font-bold text-gray-500 uppercase">Status</th>
-                <th className="px-5 py-3 text-xs font-bold text-gray-500 uppercase">Enabled</th>
-                <th className="px-5 py-3 text-xs font-bold text-gray-500 uppercase text-right w-40">Actions</th>
+                <th className="px-5 py-3 text-xs font-bold text-white/50 uppercase">Service</th>
+                <th className="px-5 py-3 text-xs font-bold text-white/50 uppercase">Status</th>
+                <th className="px-5 py-3 text-xs font-bold text-white/50 uppercase">Enabled</th>
+                <th className="px-5 py-3 text-xs font-bold text-white/50 uppercase text-right w-40">Actions</th>
               </tr>
             </thead>
             <tbody>
               {filtered.length === 0 ? (
                 <tr>
-                  <td colSpan="4" className="px-5 py-12 text-center text-gray-400">
+                  <td colSpan="4" className="px-5 py-12 text-center text-white/40">
                     {loading ? (
                       <div className="flex flex-col items-center gap-2">
                         <Loader2 size={28} className="animate-spin text-blue-500" />
@@ -270,7 +270,7 @@ const ServicesView = () => {
             </tbody>
           </table>
         </div>
-        <div className="px-5 py-2.5 bg-gray-50 border-t border-gray-100 text-xs text-gray-400 flex justify-between">
+        <div className="px-5 py-2.5 bg-white/5 border-t border-white/8 text-xs text-white/40 flex justify-between">
           <span>{filtered.length} of {services.length} services</span>
           <span>Auto-refresh every 10s</span>
         </div>

@@ -1,7 +1,9 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Globe, RefreshCw, Power, Loader2 } from 'lucide-react';
+import { useI18n } from '../i18n';
 
 const BrowserView = () => {
+  const { t } = useI18n();
   const canvasRef = useRef(null);
   const pcRef = useRef(null);
   const inputWsRef = useRef(null);
@@ -19,6 +21,72 @@ const BrowserView = () => {
   const [fps, setFps] = useState(0);
   // true = 焦点在地址栏（键盘给地址栏）；false = 焦点在画面（键盘转发到 Chrome）
   const [urlFocused, setUrlFocused] = useState(true);
+  // 持久化状态
+  const [persistUrl, setPersistUrl] = useState('');
+  const [hasHistory, setHasHistory] = useState(false);
+
+  useEffect(() => {
+    const stored = localStorage.getItem('browser_history');
+    if (stored) {
+      try {
+        const history = JSON.parse(stored);
+        const current = history.find(u => u.id === sessionId);
+        if (current) {
+          setPersistUrl(current.url);
+          setHasHistory(true);
+        }
+      } catch {}
+    }
+  }, []);
+
+  const savePersistedUrl = useCallback((newUrl) => {
+    let history = [];
+    try {
+      const stored = localStorage.getItem('browser_history');
+      history = stored ? JSON.parse(stored) : [];
+    } catch {}
+    history = history.filter(u => u.id !== sessionId);
+    history.push({ id: sessionId, url: newUrl, visitedAt: Date.now() });
+    // 只保留最近 20 条
+    if (history.length > 20) history = history.slice(-20);
+    localStorage.setItem('browser_history', JSON.stringify(history));
+    setPersistUrl(newUrl);
+    setHasHistory(true);
+  }, [sessionId]);
+
+  const clearHistory = useCallback(() => {
+    const stored = localStorage.getItem('browser_history');
+    if (stored) {
+      try {
+        const history = JSON.parse(stored).filter(u => u.id !== sessionId);
+        localStorage.setItem('browser_history', JSON.stringify(history));
+        setPersistUrl('');
+        setHasHistory(false);
+      } catch {}
+    }
+  }, [sessionId]);
+
+  const restoreHistory = useCallback(() => {
+    const stored = localStorage.getItem('browser_history');
+    if (stored) {
+      try {
+        const history = JSON.parse(stored);
+        const current = history.find(u => u.id === sessionId);
+        if (current) {
+          setUrl(current.url);
+          return true;
+        }
+      } catch {}
+    }
+    return false;
+  }, [sessionId]);
+
+  // 页面初始化时尝试恢复上次访问的 URL
+  useEffect(() => {
+    if (persistUrl && status === 'streaming' && currentUrl === 'about:blank') {
+      setUrl(persistUrl);
+    }
+  }, [status, persistUrl, currentUrl]);
 
   /* ---------------- 画面渲染 ---------------- */
 
@@ -290,6 +358,8 @@ const BrowserView = () => {
       }
       const info = await resp.json();
       setCurrentUrl(info.url);
+      setUrl(info.url);
+      savePersistedUrl(info.url);
       setError('');
       setUrlFocused(false);
     } catch (e) {
@@ -300,6 +370,7 @@ const BrowserView = () => {
   const reload = () => {
     if (currentUrl && currentUrl !== 'about:blank') {
       setUrl(currentUrl);
+      savePersistedUrl(currentUrl);
       fetch(`/browser/sessions/${sessionId}/navigate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -310,11 +381,11 @@ const BrowserView = () => {
   };
 
   const statusLabel = {
-    creating: '正在启动 Chrome...',
-    connecting: '正在建立 WebRTC 连接...',
-    streaming: '串流中',
-    disconnected: '已断开',
-    error: '出错',
+    creating: t('browser.startingChrome', '正在启动 Chrome...'),
+    connecting: t('browser.connectingWebRTC', '正在建立 WebRTC 连接...'),
+    streaming: t('browser.streaming', '串流中'),
+    disconnected: t('browser.disconnected', '已断开'),
+    error: t('browser.error', '出错'),
   }[status] || status;
 
   const isLive = status === 'streaming';
@@ -322,24 +393,43 @@ const BrowserView = () => {
   return (
     <div className="flex flex-col h-[calc(100vh-80px)] gap-4">
       {/* 地址栏 */}
-      <div className="flex gap-2 items-center bg-white p-3 rounded-xl shadow-sm border border-gray-100">
-        <button onClick={reload} title="重新加载"
-          className="p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg transition-colors">
-          <RefreshCw size={16} />
-        </button>
-        <input type="text" value={url} onChange={(e) => setUrl(e.target.value)}
-          onFocus={() => setUrlFocused(true)}
-          onKeyDown={(e) => { if (e.key === 'Enter') navigate(); }}
-          className="flex-1 px-4 py-2 border border-gray-200 rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500"
-          placeholder="输入网址后回车（点击画面可直接操作浏览器）" />
-        <button onClick={navigate} disabled={!isLive}
-          className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-40 transition-colors text-sm font-medium">
-          访问
-        </button>
+      <div className="flex flex-col gap-2 glass-strong rounded-2xl border border-white/10">
+        <div className="flex gap-2 items-center">
+          {hasHistory && (
+            <button
+              onClick={restoreHistory}
+              title={t('browser.restoringHint', '恢复上次访问的页面')}
+              className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+            >
+              <RefreshCw size={16} className="animate-pulse" />
+            </button>
+          )}
+          <button onClick={reload} title={t('browser.reloadingHint', '重新加载')}
+            className="p-2 text-white/50 hover:text-gray-700 hover:bg-white/10 rounded-lg transition-colors">
+            <RefreshCw size={16} />
+          </button>
+          <input type="text" value={url} onChange={(e) => setUrl(e.target.value)}
+            onFocus={() => setUrlFocused(true)}
+            onKeyDown={(e) => { if (e.key === 'Enter') navigate(); }}
+            className="flex-1 px-4 py-2 border border-white/10 rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500"
+            placeholder={t('browser.inputPlaceholder', '输入网址后回车（点击画面可直接操作浏览器）')} />
+          <button onClick={navigate} disabled={!isLive}
+            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-40 transition-colors text-sm font-medium">
+            {t('browser.visit', '访问')}
+          </button>
+        </div>
+        {hasHistory && (
+          <div className="text-xs text-white/50 flex items-center gap-2">
+            <span>{t('browser.historyHint', '📌 已保存上次访问地址，点击刷新图标可恢复')}</span>
+            <button onClick={clearHistory} className="hover:text-red-500 underline">
+              {t('browser.clearHistory', '清除记录')}
+            </button>
+          </div>
+        )}
       </div>
 
       {/* 画面 */}
-      <div className="flex-1 bg-black rounded-xl overflow-hidden shadow-sm border border-gray-200 relative flex items-center justify-center">
+      <div className="flex-1 bg-black rounded-xl overflow-hidden shadow-sm border border-white/10 relative flex items-center justify-center">
         {!isLive && status !== 'error' && (
           <div className="absolute inset-0 flex items-center justify-center text-white z-10 bg-black/80">
             <div className="text-center">
@@ -366,15 +456,15 @@ const BrowserView = () => {
       </div>
 
       {/* 状态栏 */}
-      <div className="flex items-center justify-between px-4 py-2 bg-white rounded-xl shadow-sm border border-gray-100 text-sm">
+      <div className="flex items-center justify-between px-4 py-2 glass rounded-xl border border-white/10 text-sm">
         <div className="flex items-center gap-2 min-w-0">
-          <Globe size={14} className="text-gray-400 shrink-0" />
-          <span className="text-gray-600 truncate">{currentUrl || '—'}</span>
+          <Globe size={14} className="text-white/40 shrink-0" />
+          <span className="text-white/70 truncate">{currentUrl || '—'}</span>
         </div>
         <div className="flex items-center gap-4 shrink-0">
-          {isLive && <span className="text-gray-400 text-xs">{fps} fps · WebRTC</span>}
+          {isLive && <span className="text-white/40 text-xs">{fps} fps · WebRTC</span>}
           {!urlFocused && isLive && (
-            <span className="text-blue-600 text-xs">键盘已接管（点地址栏退出）</span>
+            <span className="text-blue-600 text-xs">{t('browser.keyboardTakeover', '键盘已接管（点地址栏退出）')}</span>
           )}
           <div className={`flex items-center gap-2 ${isLive ? 'text-green-500' : 'text-red-500'}`}>
             <div className={`w-2 h-2 rounded-full ${isLive ? 'bg-green-500' : 'bg-red-500'}`} />

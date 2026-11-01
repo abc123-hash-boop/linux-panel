@@ -26,10 +26,12 @@ type SessionManager struct {
 	mu       sync.RWMutex
 	sessions map[string]*Session
 	nextID   atomic.Int64
+	dataDir  string // 持久化数据目录
 }
 
 var DefaultManager = &SessionManager{
 	sessions: make(map[string]*Session),
+	dataDir:  "./browser/persist", // 持久化数据目录（相对 server 根目录）
 }
 
 // BrowserInputMsg 输入消息结构（由前端 WebSocket 发送）
@@ -56,6 +58,44 @@ type Info struct {
 	ViewH      int    `json:"view_h"`
 }
 
+// SessionState 会话状态（持久化）
+type SessionState struct {
+	ID        string    `json:"id"`
+	URL       string    `json:"url"`
+	ViewW     int       `json:"view_w"`
+	ViewH     int       `json:"view_h"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+// loadSessionState 加载会话状态
+func loadSessionState(dataDir, id string) (*SessionState, error) {
+	f := filepath.Join(dataDir, id+".json")
+	data, err := os.ReadFile(f)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	var state SessionState
+	if err := json.Unmarshal(data, &state); err != nil {
+		return nil, err
+	}
+	return &state, nil
+}
+
+// saveSessionState 保存会话状态
+func saveSessionState(dataDir, id string, state *SessionState) error {
+	if err := os.MkdirAll(dataDir, 0755); err != nil {
+		return fmt.Errorf("mkdir data dir: %w", err)
+	}
+	data, err := json.MarshalIndent(state, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(dataDir, id+".json"), data, 0644)
+}
+
 // CreateSession 启动一个新的 Headless Chrome 实例
 func (m *SessionManager) CreateSession() (*Session, error) {
 	id := uuid.New().String()
@@ -78,6 +118,11 @@ func (m *SessionManager) CreateSession() (*Session, error) {
 		return nil, err
 	}
 
+	// 加载并恢复会话状态
+	if state, err := loadSessionState(m.dataDir, id); err == nil && state != nil {
+		s.restoreState(state)
+	}
+
 	return s, nil
 }
 
@@ -98,19 +143,6 @@ func (m *SessionManager) ListSessions() []Info {
 		infos = append(infos, s.Info())
 	}
 	return infos
-}
-
-// DeleteSession 停止并清理 Session
-func (m *SessionManager) DeleteSession(id string) error {
-	m.mu.Lock()
-	s, ok := m.sessions[id]
-	if !ok {
-		m.mu.Unlock()
-		return fmt.Errorf("session not found: %s", id)
-	}
-	delete(m.sessions, id)
-	m.mu.Unlock()
-	return s.Stop()
 }
 
 // CleanupOldSessions 清理上次运行残留的 Chrome 进程和 profile 目录
@@ -161,6 +193,19 @@ func killOrphanChrome(root string) {
 	}
 }
 
+// DeleteSession 停止并清理 Session
+func (m *SessionManager) DeleteSession(id string) error {
+	m.mu.Lock()
+	s, ok := m.sessions[id]
+	if !ok {
+		m.mu.Unlock()
+		return fmt.Errorf("session not found: %s", id)
+	}
+	delete(m.sessions, id)
+	m.mu.Unlock()
+	return s.Stop()
+}
+
 // Shutdown 关闭所有 Session（Panel 退出时调用）
 func (m *SessionManager) Shutdown() {
 	m.mu.Lock()
@@ -201,7 +246,7 @@ type Session struct {
 	cancel  context.CancelFunc
 	closed  bool
 	mu      sync.Mutex
-	cached  cacheEntry // 5秒内的 DOM/text 缓存，避免重复连接 Chrome
+	cached  cacheEntry // 5 秒内的 DOM/text 缓存，避免重复连接 Chrome
 }
 
 // cacheEntry 缓存条目
@@ -253,6 +298,15 @@ func NewSession(id, profileDir string) *Session {
 	}
 }
 
+// restoreState 恢复会话状态（持久化的 URL、viewport）
+func (s *Session) restoreState(state *SessionState) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.CurrentURL = state.URL
+	s.ViewW = state.ViewW
+	s.ViewH = state.ViewH
+}
+
 // Start 启动 Headless Chrome（browser-lab 风格：手动进程 + stderr 解析 ws URL）
 func (s *Session) Start() error {
 	ctx, cancel := context.WithCancel(context.Background())
@@ -298,7 +352,6 @@ func (s *Session) Start() error {
 	if err != nil {
 		_ = cmd.Process.Kill()
 		cancel()
-		_ = os.RemoveAll(s.ProfileDir)
 		return fmt.Errorf("parse devtools url: %w", err)
 	}
 	s.wsURL = wsURL
@@ -308,7 +361,6 @@ func (s *Session) Start() error {
 	if err != nil {
 		_ = cmd.Process.Kill()
 		cancel()
-		_ = os.RemoveAll(s.ProfileDir)
 		return fmt.Errorf("parse port: %w", err)
 	}
 	s.Port = parsed
@@ -322,7 +374,7 @@ func (s *Session) Start() error {
 	return nil
 }
 
-// Stop 停止 Chrome 并清理资源
+// Stop 停止 Chrome（保留 profile 目录实现持久化）
 func (s *Session) Stop() error {
 	s.mu.Lock()
 	if s.closed {
@@ -332,6 +384,9 @@ func (s *Session) Stop() error {
 	s.closed = true
 	cancel := s.cancel
 	cmd := s.cmd
+	url := s.CurrentURL
+	viewW := s.ViewW
+	viewH := s.ViewH
 	s.mu.Unlock()
 
 	if cancel != nil {
@@ -347,7 +402,21 @@ func (s *Session) Stop() error {
 			<-done
 		}
 	}
-	_ = os.RemoveAll(s.ProfileDir)
+
+	// 保存会话状态（持久化）
+	state := &SessionState{
+		ID:        s.ID,
+		URL:       url,
+		ViewW:     viewW,
+		ViewH:     viewH,
+		CreatedAt: s.CreatedAt,
+	}
+	if err := saveSessionState(DefaultManager.dataDir, s.ID, state); err != nil {
+		fmt.Printf("[Browser] save state err: %v\n", err)
+	}
+
+	// 保留 profile 目录：不再删除，Cookie/LocalStorage/历史均被持久化
+	// _ = os.RemoveAll(s.ProfileDir)
 	return nil
 }
 
@@ -381,7 +450,7 @@ func (s *Session) pageWSURL() (string, error) {
 	return "", fmt.Errorf("no page target")
 }
 
-// getDOM 获取页面 DOM（5秒内返回缓存，避免重复连接 Chrome）
+// getDOM 获取页面 DOM（5 秒内返回缓存，避免重复连接 Chrome）
 func (s *Session) getDOM() (string, error) {
 	s.mu.Lock()
 	entry := s.cached
@@ -425,7 +494,7 @@ func (s *Session) getDOM() (string, error) {
 	return html, nil
 }
 
-// getText 获取页面可见文本（5秒内返回缓存）
+// getText 获取页面可见文本（5 秒内返回缓存）
 func (s *Session) getText() (string, error) {
 	s.mu.Lock()
 	entry := s.cached

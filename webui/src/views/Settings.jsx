@@ -1,8 +1,15 @@
 import React, { useState } from 'react';
+import { clsx } from 'clsx';
+import { twMerge } from 'tailwind-merge';
 import { Lock, Globe, CheckCircle, AlertCircle } from 'lucide-react';
 import apiClient from '../api/client';
+import { useI18n } from '../i18n';
+
+const cn = (...inputs) => twMerge(clsx(inputs));
 
 const SettingsView = () => {
+  const { lang, setLang, t } = useI18n();
+
   // 密码修改
   const [oldPassword, setOldPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
@@ -11,7 +18,6 @@ const SettingsView = () => {
   const [pwdLoading, setPwdLoading] = useState(false);
 
   // 语言设置
-  const [language, setLanguage] = useState('zh');
   const [langSaved, setLangSaved] = useState(false);
 
   // 处理密码修改
@@ -20,11 +26,11 @@ const SettingsView = () => {
     setPwdStatus({ type: '', msg: '' });
 
     if (newPassword !== confirmPassword) {
-      setPwdStatus({ type: 'error', msg: '两次输入的新密码不一致' });
+      setPwdStatus({ type: 'error', msg: lang === 'zh' ? '两次输入的新密码不一致' : 'New passwords do not match' });
       return;
     }
     if (newPassword.length < 6) {
-      setPwdStatus({ type: 'error', msg: '新密码长度不能少于6位' });
+      setPwdStatus({ type: 'error', msg: lang === 'zh' ? '新密码长度不能少于6位' : 'Password must be at least 6 characters' });
       return;
     }
 
@@ -34,12 +40,12 @@ const SettingsView = () => {
         old_password: oldPassword,
         new_password: newPassword,
       });
-      setPwdStatus({ type: 'success', msg: '密码修改成功' });
+      setPwdStatus({ type: 'success', msg: lang === 'zh' ? '密码修改成功' : 'Password updated successfully' });
       setOldPassword('');
       setNewPassword('');
       setConfirmPassword('');
     } catch (err) {
-      const msg = err.response?.data?.error || '修改失败，请检查旧密码是否正确';
+      const msg = err.response?.data?.error || (lang === 'zh' ? '修改失败，请检查旧密码是否正确' : 'Failed to update password');
       setPwdStatus({ type: 'error', msg });
     } finally {
       setPwdLoading(false);
@@ -48,8 +54,7 @@ const SettingsView = () => {
 
   // 处理语言切换
   const handleLanguageChange = (value) => {
-    setLanguage(value);
-    localStorage.setItem('panel_language', value);
+    setLang(value);
     setLangSaved(true);
     setTimeout(() => setLangSaved(false), 2000);
   };
@@ -57,62 +62,62 @@ const SettingsView = () => {
   return (
     <div className="max-w-2xl space-y-8">
       <div>
-        <h1 className="text-2xl font-bold text-gray-800">Settings</h1>
-        <p className="text-gray-500">Change password & language</p>
+        <h1 className="text-3xl font-bold text-white bg-gradient-to-r from-white to-violet-200 bg-clip-text text-transparent">
+          {t('settings.title', 'Settings')}
+        </h1>
+        <p className="text-white/50 mt-1">{t('settings.subtitle', 'Change password & language')}</p>
       </div>
 
       {/* 修改密码 */}
-      <section className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
-        <div className="px-6 py-4 border-b border-gray-100 flex items-center gap-2">
-          <Lock className="text-gray-400" size={20} />
-          <h2 className="text-lg font-semibold text-gray-800">Change Password</h2>
+      <section className="glass-strong rounded-2xl overflow-hidden border border-white/10">
+        <div className="px-6 py-4 border-b border-white/8 flex items-center gap-2 bg-white/5">
+          <Lock className="text-violet-400" size={20} />
+          <h2 className="text-lg font-semibold text-white">{t('settings.pwdTitle', 'Change Password')}</h2>
         </div>
         <div className="p-6">
           <form onSubmit={handleChangePassword} className="space-y-4">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Old Password</label>
+              <label className="block text-sm font-medium text-white/80 mb-2">{t('settings.oldPwd', 'Old Password')}</label>
               <input
                 type="password"
                 value={oldPassword}
                 onChange={(e) => setOldPassword(e.target.value)}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
-                placeholder="Enter old password"
+                className="glass-input w-full px-4 py-3 rounded-xl text-sm outline-none"
+                placeholder={lang === 'zh' ? '输入旧密码' : 'Enter old password'}
                 required
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">New Password</label>
+              <label className="block text-sm font-medium text-white/80 mb-2">{t('settings.newPwd', 'New Password')}</label>
               <input
                 type="password"
                 value={newPassword}
                 onChange={(e) => setNewPassword(e.target.value)}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
-                placeholder="Enter new password (min 6 chars)"
+                className="glass-input w-full px-4 py-3 rounded-xl text-sm outline-none"
+                placeholder={lang === 'zh' ? '输入新密码（至少6位）' : 'Enter new password (min 6 chars)'}
                 required
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Confirm New Password</label>
+              <label className="block text-sm font-medium text-white/80 mb-2">{t('settings.confirmPwd', 'Confirm New Password')}</label>
               <input
                 type="password"
                 value={confirmPassword}
                 onChange={(e) => setConfirmPassword(e.target.value)}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
-                placeholder="Re-enter new password"
+                className="glass-input w-full px-4 py-3 rounded-xl text-sm outline-none"
+                placeholder={lang === 'zh' ? '再次输入新密码' : 'Re-enter new password'}
                 required
               />
             </div>
 
             {pwdStatus.msg && (
-              <div className={`flex items-center gap-2 px-4 py-3 rounded-lg ${
+              <div className={cn(
+                "flex items-center gap-2 px-4 py-3 rounded-xl backdrop-blur-sm border",
                 pwdStatus.type === 'success'
-                  ? 'bg-green-50 text-green-700 border border-green-200'
-                  : 'bg-red-50 text-red-700 border border-red-200'
-              }`}>
-                {pwdStatus.type === 'success'
-                  ? <CheckCircle size={18} />
-                  : <AlertCircle size={18} />
-                }
+                  ? 'bg-green-500/15 border-green-500/30 text-green-200'
+                  : 'bg-red-500/15 border-red-500/30 text-red-200'
+              )}>
+                {pwdStatus.type === 'success' ? <CheckCircle size={18} /> : <AlertCircle size={18} />}
                 <span>{pwdStatus.msg}</span>
               </div>
             )}
@@ -120,53 +125,54 @@ const SettingsView = () => {
             <button
               type="submit"
               disabled={pwdLoading}
-              className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-blue-400 transition-colors font-medium"
+              className="w-full py-3 px-4 bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white rounded-xl transition-all font-medium shadow-[0_4px_20px_rgba(139,92,246,0.3)] disabled:opacity-50"
             >
-              {pwdLoading ? 'Updating...' : 'Update Password'}
+              {pwdLoading ? (lang === 'zh' ? '更新中...' : 'Updating...') : t('settings.updateBtn', 'Update Password')}
             </button>
           </form>
         </div>
       </section>
 
       {/* 语言设置 */}
-      <section className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
-        <div className="px-6 py-4 border-b border-gray-100 flex items-center gap-2">
-          <Globe className="text-gray-400" size={20} />
-          <h2 className="text-lg font-semibold text-gray-800">Language</h2>
+      <section className="glass-strong rounded-2xl overflow-hidden border border-white/10">
+        <div className="px-6 py-4 border-b border-white/8 flex items-center gap-2 bg-white/5">
+          <Globe className="text-violet-400" size={20} />
+          <h2 className="text-lg font-semibold text-white">{t('settings.langTitle', 'Language')}</h2>
         </div>
         <div className="p-6">
           <div className="space-y-3">
             {[
               { value: 'zh', label: '中文 (简体)', flag: '🇨🇳' },
               { value: 'en', label: 'English', flag: '🇺🇸' },
-            ].map((lang) => (
+            ].map((item) => (
               <label
-                key={lang.value}
-                className={`flex items-center gap-3 px-4 py-3 rounded-lg border cursor-pointer transition-colors ${
-                  language === lang.value
-                    ? 'border-blue-500 bg-blue-50'
-                    : 'border-gray-200 hover:border-gray-300'
-                }`}
+                key={item.value}
+                className={cn(
+                  "flex items-center gap-4 px-5 py-4 rounded-xl border cursor-pointer transition-all",
+                  lang === item.value
+                    ? "bg-gradient-to-r from-violet-500/20 to-indigo-500/20 border-violet-500/50 shadow-lg shadow-violet-500/10"
+                    : "bg-white/5 border-white/10 hover:bg-white/10 hover:border-white/20"
+                )}
               >
                 <input
                   type="radio"
                   name="language"
-                  value={lang.value}
-                  checked={language === lang.value}
+                  value={item.value}
+                  checked={lang === item.value}
                   onChange={(e) => handleLanguageChange(e.target.value)}
                   className="sr-only"
                 />
-                <span className="text-xl">{lang.flag}</span>
-                <span className="font-medium text-gray-700">{lang.label}</span>
-                {language === lang.value && (
-                  <CheckCircle className="ml-auto text-blue-600" size={18} />
+                <span className="text-2xl">{item.flag}</span>
+                <span className={cn("font-medium", lang === item.value ? "text-white" : "text-white/70")}>{item.label}</span>
+                {lang === item.value && (
+                  <CheckCircle className="ml-auto text-violet-400" size={20} />
                 )}
               </label>
             ))}
           </div>
           {langSaved && (
-            <p className="mt-3 text-sm text-green-600 flex items-center gap-1">
-              <CheckCircle size={14} /> Language saved
+            <p className="mt-3 text-sm text-green-400 flex items-center gap-1">
+              <CheckCircle size={14} /> {t('settings.saved', 'Language saved')}
             </p>
           )}
         </div>

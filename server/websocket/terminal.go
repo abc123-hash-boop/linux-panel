@@ -81,8 +81,8 @@ func Terminal(c *gin.Context) {
 		"-l",
 	)
 
-	// 保留当前环境变量
-	cmd.Env = os.Environ()
+	// 保留当前环境变量，并补上终端标题所需的变量
+	cmd.Env = TerminalEnv(os.Environ())
 
 	// 创建独立 session
 	cmd.SysProcAttr = &syscall.SysProcAttr{

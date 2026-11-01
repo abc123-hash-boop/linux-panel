@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import apiClient from '../api/client';
+import { useI18n } from '../i18n';
 import {
   Folder, File, FolderOpen, ArrowUp, Search, RefreshCw,
   Plus, Trash2, Edit2, Download, MoreVertical, ChevronRight,
@@ -18,21 +19,23 @@ const formatSize = (bytes) => {
 };
 
 const getIcon = (file) => {
-  if (file.dir) return <FolderOpen className="text-blue-500" size={18} />;
+  if (file.dir) return <FolderOpen className="text-white" size={18} />;
   const ext = (file.name.split('.').pop() || '').toLowerCase();
   const imgExts = ['png','jpg','jpeg','gif','bmp','svg','webp','ico'];
   const codeExts = ['c','cpp','h','hpp','rs','java','rb','php'];
   if (imgExts.includes(ext)) return <ImageIcon className="text-pink-500" size={18} />;
-  if (['txt','md','log','csv','json','xml','yaml','yml','html','css','js','jsx','ts','go','py','sh','conf','ini','cfg','env'].includes(ext)) return <FileText className="text-gray-500" size={18} />;
+  if (['txt','md','log','csv','json','xml','yaml','yml','html','css','js','jsx','ts','go','py','sh','conf','ini','cfg','env'].includes(ext)) return <FileText className="text-white/50" size={18} />;
   if (['zip','tar','gz','bz2','xz','rar','7z'].includes(ext)) return <Archive className="text-yellow-600" size={18} />;
-  return <File className="text-gray-400" size={18} />;
+  return <File className="text-white/40" size={18} />;
 };
 
 const formatDate = (mtime) => {
   if (!mtime) return '--';
   const d = new Date(mtime * 1000);
   if (isNaN(d.getTime())) return '--';
-  return d.toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+  let lang = 'zh';
+  try { lang = localStorage.getItem('panel_language') || 'zh'; } catch {}
+  return d.toLocaleString(lang === 'zh' ? 'zh-CN' : 'en-US', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
 };
 
 const isTextFile = (name) => {
@@ -44,6 +47,7 @@ const isTextFile = (name) => {
 
 // ─── 新建 Modal ─────────────────────────────────────────────
 const NewItemModal = ({ type, currentPath, onClose, onCreated }) => {
+  const { t } = useI18n();
   const [name, setName] = useState('');
   const [content, setContent] = useState('');
   const [error, setError] = useState('');
@@ -54,7 +58,7 @@ const NewItemModal = ({ type, currentPath, onClose, onCreated }) => {
 
   const submit = async () => {
     const base = currentPath === '/' ? '/' + name : currentPath + '/' + name;
-    if (!base || base === '/') { setError('名称不能为空'); return; }
+    if (!base || base === '/') { setError(t('files.nameRequired', 'Name is required')); return; }
     try {
       setLoading(true);
       if (type === 'folder') {
@@ -69,16 +73,16 @@ const NewItemModal = ({ type, currentPath, onClose, onCreated }) => {
 
   return (
     <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-      <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm p-6">
+      <div className="glass-dark rounded-2xl w-full max-w-sm p-6">
         <div className="flex items-center justify-between mb-4">
-          <h3 className="font-bold text-gray-800 flex items-center gap-2">
-            {type === 'folder' ? <Folder size={18} className="text-blue-500" /> : <FileText size={18} className="text-gray-500" />}
-            New {type === 'folder' ? 'Folder' : 'File'}
+          <h3 className="font-bold text-white flex items-center gap-2">
+            {type === 'folder' ? <Folder size={18} className="text-white" /> : <FileText size={18} className="text-white/50" />}
+            {type === 'folder' ? t('files.newFolderTitle', 'New Folder') : t('files.newFileTitle', 'New File')}
           </h3>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600"><X size={18} /></button>
+          <button onClick={onClose} className="text-white/40 hover:text-white/70"><X size={18} /></button>
         </div>
         <div className="mb-3">
-          <label className="block text-xs text-gray-500 mb-1">Name</label>
+          <label className="block text-xs text-white/50 mb-1">{t('files.nameLabel', 'Name')}</label>
           <input ref={inputRef} value={name} onChange={e => setName(e.target.value)}
             onKeyDown={e => e.key === 'Enter' && !loading && submit()}
             placeholder={type === 'folder' ? 'my-folder' : 'file.txt'}
@@ -86,15 +90,15 @@ const NewItemModal = ({ type, currentPath, onClose, onCreated }) => {
         </div>
         {type === 'file' && (
           <div className="mb-3">
-            <label className="block text-xs text-gray-500 mb-1">Content (optional)</label>
+            <label className="block text-xs text-white/50 mb-1">{t('files.contentOptional', 'Content (optional)')}</label>
             <textarea value={content} onChange={e => setContent(e.target.value)} rows={3}
               className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm font-mono outline-none focus:ring-2 focus:ring-blue-500" />
           </div>
         )}
         {error && <p className="text-red-500 text-xs mb-3">{error}</p>}
         <div className="flex justify-end gap-2">
-          <button onClick={onClose} className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg">Cancel</button>
-          <button onClick={submit} disabled={loading} className="px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 disabled:opacity-50">Create</button>
+          <button onClick={onClose} className="px-4 py-2 text-sm text-white/70 hover:bg-white/10 rounded-lg">{t('files.cancel', 'Cancel')}</button>
+          <button onClick={submit} disabled={loading} className="px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 disabled:opacity-50">{t('files.create', 'Create')}</button>
         </div>
       </div>
     </div>
@@ -103,6 +107,7 @@ const NewItemModal = ({ type, currentPath, onClose, onCreated }) => {
 
 // ─── 重命名 Modal ───────────────────────────────────────────
 const RenameModal = ({ item, currentPath, onClose, onRenamed }) => {
+  const { t } = useI18n();
   const [name, setName] = useState(item?.name || '');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
@@ -111,7 +116,7 @@ const RenameModal = ({ item, currentPath, onClose, onRenamed }) => {
   useEffect(() => { inputRef.current?.focus(); inputRef.current?.select(); }, []);
 
   const submit = async () => {
-    if (!name.trim()) { setError('名称不能为空'); return; }
+    if (!name.trim()) { setError(t('files.nameRequired', 'Name is required')); return; }
     const oldPath = currentPath === '/' ? '/' + item.name : currentPath + '/' + item.name;
     const newPath = currentPath === '/' ? '/' + name : currentPath + '/' + name;
     try {
@@ -124,21 +129,21 @@ const RenameModal = ({ item, currentPath, onClose, onRenamed }) => {
 
   return (
     <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-      <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm p-6">
+      <div className="glass-dark rounded-2xl w-full max-w-sm p-6">
         <div className="flex items-center justify-between mb-4">
-          <h3 className="font-bold text-gray-800">Rename</h3>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600"><X size={18} /></button>
+          <h3 className="font-bold text-white">{t('files.renameTitle', 'Rename')}</h3>
+          <button onClick={onClose} className="text-white/40 hover:text-white/70"><X size={18} /></button>
         </div>
         <div className="mb-3">
-          <label className="block text-xs text-gray-500 mb-1">New name</label>
+          <label className="block text-xs text-white/50 mb-1">{t('files.newName', 'New name')}</label>
           <input ref={inputRef} value={name} onChange={e => setName(e.target.value)}
             onKeyDown={e => e.key === 'Enter' && !loading && submit()}
             className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500" />
         </div>
         {error && <p className="text-red-500 text-xs mb-3">{error}</p>}
         <div className="flex justify-end gap-2">
-          <button onClick={onClose} className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg">Cancel</button>
-          <button onClick={submit} disabled={loading} className="px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 disabled:opacity-50">Rename</button>
+          <button onClick={onClose} className="px-4 py-2 text-sm text-white/70 hover:bg-white/10 rounded-lg">{t('files.cancel', 'Cancel')}</button>
+          <button onClick={submit} disabled={loading} className="px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 disabled:opacity-50">{t('files.rename', 'Rename')}</button>
         </div>
       </div>
     </div>
@@ -147,6 +152,7 @@ const RenameModal = ({ item, currentPath, onClose, onRenamed }) => {
 
 // ─── 删除确认 ───────────────────────────────────────────────
 const DeleteConfirmModal = ({ item, currentPath, onClose, onDeleted }) => {
+  const { t } = useI18n();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
@@ -162,20 +168,20 @@ const DeleteConfirmModal = ({ item, currentPath, onClose, onDeleted }) => {
 
   return (
     <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-      <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm p-6">
+      <div className="glass-dark rounded-2xl w-full max-w-sm p-6">
         <div className="flex items-center gap-3 mb-4 text-red-600">
           <AlertCircle size={24} />
-          <h3 className="font-bold text-gray-800">Delete {item.dir ? 'Folder' : 'File'}</h3>
+          <h3 className="font-bold text-white">{item.dir ? t('files.deleteFolderTitle', 'Delete Folder') : t('files.deleteFileTitle', 'Delete File')}</h3>
         </div>
-        <p className="text-sm text-gray-600 mb-1">Are you sure you want to delete:</p>
-        <p className="text-sm font-mono text-gray-800 mb-4 bg-gray-50 p-2 rounded truncate">
+        <p className="text-sm text-white/70 mb-1">{t('files.deleteConfirmQ', 'Are you sure you want to delete:')}</p>
+        <p className="text-sm font-mono text-white mb-4 bg-white/5 p-2 rounded truncate">
           {currentPath === '/' ? '/' + item.name : currentPath + '/' + item.name}
         </p>
-        {item.dir && <p className="text-xs text-orange-600 mb-4">⚠ This will recursively delete all contents.</p>}
+        {item.dir && <p className="text-xs text-orange-600 mb-4">{t('files.deleteRecursiveWarn', '⚠ This will recursively delete all contents.')}</p>}
         {error && <p className="text-red-500 text-xs mb-3">{error}</p>}
         <div className="flex justify-end gap-2">
-          <button onClick={onClose} className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg">Cancel</button>
-          <button onClick={doDelete} disabled={loading} className="px-4 py-2 bg-red-600 text-white text-sm rounded-lg hover:bg-red-700 disabled:opacity-50">Delete</button>
+          <button onClick={onClose} className="px-4 py-2 text-sm text-white/70 hover:bg-white/10 rounded-lg">{t('files.cancel', 'Cancel')}</button>
+          <button onClick={doDelete} disabled={loading} className="px-4 py-2 bg-red-600 text-white text-sm rounded-lg hover:bg-red-700 disabled:opacity-50">{t('files.delete', 'Delete')}</button>
         </div>
       </div>
     </div>
@@ -184,6 +190,7 @@ const DeleteConfirmModal = ({ item, currentPath, onClose, onDeleted }) => {
 
 // ─── 文件内容查看 Modal ─────────────────────────────────────
 const FileViewModal = ({ file, currentPath, onClose, onEdit }) => {
+  const { t } = useI18n();
   const [content, setContent] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -198,24 +205,24 @@ const FileViewModal = ({ file, currentPath, onClose, onEdit }) => {
 
   return (
     <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-      <div className="bg-white rounded-xl shadow-2xl w-full max-w-3xl max-h-[85vh] flex flex-col">
-        <div className="flex items-center justify-between p-4 border-b border-gray-100">
+      <div className="glass-dark rounded-2xl w-full max-w-3xl max-h-[85vh] flex flex-col">
+        <div className="flex items-center justify-between p-4 border-b border-white/8">
           <div className="flex items-center gap-2">
             {getIcon(file)}
-            <h3 className="font-bold text-gray-800">{file.name}</h3>
-            <span className="text-xs text-gray-400 font-mono hidden sm:inline">{currentPath === '/' ? '/' + file.name : currentPath + '/' + file.name}</span>
+            <h3 className="font-bold text-white">{file.name}</h3>
+            <span className="text-xs text-white/40 font-mono hidden sm:inline">{currentPath === '/' ? '/' + file.name : currentPath + '/' + file.name}</span>
           </div>
           <div className="flex items-center gap-2">
             <button onClick={() => { onClose(); onEdit && onEdit(); }}
               className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 transition-colors">
-              <Edit2 size={14} /> Edit
+              <Edit2 size={14} /> {t('files.edit', 'Edit')}
             </button>
-            <button onClick={onClose} className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg"><X size={18} /></button>
+            <button onClick={onClose} className="p-2 text-white/40 hover:text-white/70 hover:bg-white/10 rounded-lg"><X size={18} /></button>
           </div>
         </div>
         <div className="flex-1 overflow-auto p-4 bg-gray-950">
           {loading ? (
-            <p className="text-gray-500 text-sm">Loading...</p>
+            <p className="text-white/50 text-sm">{t('files.loading', 'Loading...')}</p>
           ) : error ? (
             <p className="text-red-400 text-sm">{error}</p>
           ) : (
@@ -229,6 +236,7 @@ const FileViewModal = ({ file, currentPath, onClose, onEdit }) => {
 
 // ─── 文件编辑 Modal ─────────────────────────────────────────
 const FileEditModal = ({ file, currentPath, onClose, onSave }) => {
+  const { t } = useI18n();
   const [content, setContent] = useState('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -260,25 +268,25 @@ const FileEditModal = ({ file, currentPath, onClose, onSave }) => {
 
   return (
     <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-      <div className="bg-white rounded-xl shadow-2xl w-full max-w-4xl max-h-[90vh] flex flex-col">
-        <div className="flex items-center justify-between p-4 border-b border-gray-100">
+      <div className="glass-dark rounded-2xl w-full max-w-4xl max-h-[90vh] flex flex-col">
+        <div className="flex items-center justify-between p-4 border-b border-white/8">
           <div className="flex items-center gap-2">
             {getIcon(file)}
-            <h3 className="font-bold text-gray-800">{file.name}</h3>
-            <span className="text-xs text-gray-400 font-mono hidden sm:inline">{currentPath === '/' ? '/' + file.name : currentPath + '/' + file.name}</span>
+            <h3 className="font-bold text-white">{file.name}</h3>
+            <span className="text-xs text-white/40 font-mono hidden sm:inline">{currentPath === '/' ? '/' + file.name : currentPath + '/' + file.name}</span>
           </div>
           <div className="flex items-center gap-2">
             <button onClick={handleSave} disabled={saving}
               className="flex items-center gap-1.5 px-3 py-1.5 bg-green-600 text-white text-sm rounded-lg hover:bg-green-700 disabled:opacity-50 transition-colors">
               {saving ? <RefreshCw size={14} className="animate-spin" /> : <Save size={14} />}
-              {saving ? 'Saving...' : 'Save'}
+              {saving ? t('files.saving', 'Saving...') : t('files.save', 'Save')}
             </button>
-            <button onClick={onClose} className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg"><X size={18} /></button>
+            <button onClick={onClose} className="p-2 text-white/40 hover:text-white/70 hover:bg-white/10 rounded-lg"><X size={18} /></button>
           </div>
         </div>
         <div className="flex-1 overflow-auto bg-gray-950">
           {loading ? (
-            <p className="text-gray-500 text-sm p-4">Loading...</p>
+            <p className="text-white/50 text-sm p-4">{t('files.loading', 'Loading...')}</p>
           ) : error ? (
             <p className="text-red-400 text-sm p-4">{error}</p>
           ) : (
@@ -289,7 +297,7 @@ const FileEditModal = ({ file, currentPath, onClose, onSave }) => {
         </div>
         {success && (
           <div className="px-4 py-2 bg-green-500/10 border-t border-green-500/20 text-green-400 text-sm">
-            ✓ File saved successfully
+            {t('files.fileSaved', '✓ File saved successfully')}
           </div>
         )}
         {error && success === false && (
@@ -304,6 +312,7 @@ const FileEditModal = ({ file, currentPath, onClose, onSave }) => {
 
 // ─── 上传 Modal ─────────────────────────────────────────────
 const UploadModal = ({ currentPath, onClose, onUploaded }) => {
+  const { t } = useI18n();
   const [files, setFiles] = useState([]);
   const [uploading, setUploading] = useState(false);
   const [progress, setProgress] = useState(0);
@@ -324,7 +333,7 @@ const UploadModal = ({ currentPath, onClose, onUploaded }) => {
   };
 
   const doUpload = async () => {
-    if (files.length === 0) { setError('请先选择文件'); return; }
+    if (files.length === 0) { setError(t('files.selectFilesFirst', 'Please select files first')); return; }
     try {
       setUploading(true);
       setProgress(0);
@@ -347,12 +356,12 @@ const UploadModal = ({ currentPath, onClose, onUploaded }) => {
 
   return (
     <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-      <div className="bg-white rounded-xl shadow-2xl w-full max-w-md">
-        <div className="flex items-center justify-between p-5 border-b border-gray-100">
-          <h3 className="font-bold text-gray-800 flex items-center gap-2">
-            <Upload size={18} className="text-blue-600" /> Upload Files
+      <div className="glass-dark rounded-2xl w-full max-w-md">
+        <div className="flex items-center justify-between p-5 border-b border-white/8">
+          <h3 className="font-bold text-white flex items-center gap-2">
+            <Upload size={18} className="text-blue-600" /> {t('files.uploadTitle', 'Upload Files')}
           </h3>
-          <button onClick={onClose} className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg"><X size={18} /></button>
+          <button onClick={onClose} className="p-2 text-white/40 hover:text-white/70 hover:bg-white/10 rounded-lg"><X size={18} /></button>
         </div>
 
         <div className="p-5 space-y-4">
@@ -364,22 +373,22 @@ const UploadModal = ({ currentPath, onClose, onUploaded }) => {
             onClick={() => inputRef.current?.click()}
             className={cn(
               "border-2 border-dashed rounded-xl p-8 text-center cursor-pointer transition-colors",
-              dragOver ? "border-blue-500 bg-blue-50" : "border-gray-200 hover:border-blue-300 hover:bg-gray-50"
+              dragOver ? "border-blue-500 bg-blue-50" : "border-white/10 hover:border-blue-300 hover:bg-white/5"
             )}
           >
-            <Upload size={32} className={cn("mx-auto mb-3", dragOver ? "text-blue-500" : "text-gray-400")} />
-            <p className="text-sm font-medium text-gray-700">Drop files here or click to browse</p>
-            <p className="text-xs text-gray-400 mt-1">Target: {currentPath}</p>
+            <Upload size={32} className={cn("mx-auto mb-3", dragOver ? "text-blue-500" : "text-white/40")} />
+            <p className="text-sm font-medium text-gray-700">{t('files.dropHint', 'Drop files here or click to browse')}</p>
+            <p className="text-xs text-white/40 mt-1">{t('files.targetLabel', 'Target')}: {currentPath}</p>
             <input ref={inputRef} type="file" multiple onChange={handleSelect} className="hidden" />
           </div>
 
           {/* Selected Files */}
           {files.length > 0 && (
             <div className="space-y-1">
-              <p className="text-xs text-gray-500 font-medium">{files.length} file(s) selected</p>
+              <p className="text-xs text-white/50 font-medium">{files.length} {t('files.selectedCount', 'file(s) selected')}</p>
               <div className="max-h-32 overflow-y-auto space-y-0.5">
                 {files.map((f, i) => (
-                  <p key={i} className="text-xs text-gray-600 font-mono truncate px-2 py-1 bg-gray-50 rounded">{f.name} <span className="text-gray-400">({formatSize(f.size)})</span></p>
+                  <p key={i} className="text-xs text-white/70 font-mono truncate px-2 py-1 bg-white/5 rounded">{f.name} <span className="text-white/40">({formatSize(f.size)})</span></p>
                 ))}
               </div>
             </div>
@@ -388,8 +397,8 @@ const UploadModal = ({ currentPath, onClose, onUploaded }) => {
           {/* Progress */}
           {uploading && (
             <div>
-              <div className="flex justify-between text-xs text-gray-500 mb-1">
-                <span>Uploading...</span>
+              <div className="flex justify-between text-xs text-white/50 mb-1">
+                <span>{t('files.uploading', 'Uploading...')}</span>
                 <span>{progress}%</span>
               </div>
               <div className="w-full bg-gray-200 rounded-full h-2">
@@ -401,11 +410,11 @@ const UploadModal = ({ currentPath, onClose, onUploaded }) => {
           {error && <p className="text-red-500 text-xs">{error}</p>}
         </div>
 
-        <div className="flex justify-end gap-2 p-5 border-t border-gray-100 bg-gray-50 rounded-b-xl">
-          <button onClick={onClose} disabled={uploading} className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg disabled:opacity-50">Cancel</button>
+        <div className="flex justify-end gap-2 p-5 border-t border-white/8 bg-white/5 rounded-b-xl">
+          <button onClick={onClose} disabled={uploading} className="px-4 py-2 text-sm text-white/70 hover:bg-white/10 rounded-lg disabled:opacity-50">{t('files.cancel', 'Cancel')}</button>
           <button onClick={doUpload} disabled={uploading || files.length === 0}
             className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 disabled:opacity-50">
-            <Upload size={16} /> {uploading ? 'Uploading...' : `Upload ${files.length} file${files.length > 1 ? 's' : ''}`}
+            <Upload size={16} /> {uploading ? t('files.uploading', 'Uploading...') : `${t('files.uploadBtn', 'Upload')} ${files.length}`}
           </button>
         </div>
       </div>
@@ -415,6 +424,7 @@ const UploadModal = ({ currentPath, onClose, onUploaded }) => {
 
 // ─── 主视图 ─────────────────────────────────────────────────
 const FilesView = () => {
+  const { t } = useI18n();
   const [files, setFiles] = useState([]);
   const [currentPath, setCurrentPath] = useState('/');
   const [loading, setLoading] = useState(true);
@@ -441,7 +451,7 @@ const FilesView = () => {
       setError(null);
     } catch (err) {
       console.error('Failed to fetch files:', err);
-      setError(err.response?.data?.error || 'Failed to load directory');
+      setError(err.response?.data?.error || t('files.loadError', 'Failed to load directory'));
       setFiles([]);
     } finally {
       setLoading(false);
@@ -491,31 +501,31 @@ const FilesView = () => {
     <div className="space-y-4">
       {/* Header */}
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-gray-800">File Manager</h1>
+        <h1 className="text-2xl font-bold text-white">{t('files.title', 'File Manager')}</h1>
         <div className="flex items-center gap-2">
           <button onClick={() => setShowUpload(true)}
             className="flex items-center gap-2 px-3 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 text-sm font-medium transition-colors">
-            <Upload size={16} /> Upload
+            <Upload size={16} /> {t('files.upload', 'Upload')}
           </button>
           <button onClick={() => setShowNew('folder')}
             className="flex items-center gap-2 px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm font-medium transition-colors">
-            <Plus size={16} /> New Folder
+            <Plus size={16} /> {t('files.newFolder', 'New Folder')}
           </button>
           <button onClick={() => setShowNew('file')}
             className="flex items-center gap-2 px-3 py-2 bg-gray-700 text-white rounded-lg hover:bg-gray-800 text-sm font-medium transition-colors">
-            <FileText size={16} /> New File
+            <FileText size={16} /> {t('files.newFile', 'New File')}
           </button>
           <button onClick={() => fetchFiles(currentPath)}
-            className="p-2 text-gray-500 hover:bg-gray-100 rounded-lg transition-colors" title="Refresh">
+            className="p-2 text-white/50 hover:bg-white/10 rounded-lg transition-colors" title={t('files.refresh', 'Refresh')}>
             <RefreshCw size={18} className={loading ? 'animate-spin' : ''} />
           </button>
         </div>
       </div>
 
       {/* Toolbar */}
-      <div className="flex items-center gap-3 bg-white p-3 rounded-xl border border-gray-100 shadow-sm flex-wrap">
+      <div className="flex items-center gap-3 glass p-6 rounded-xl border border-white/8 shadow-sm flex-wrap">
         <button onClick={goUp} disabled={currentPath === '/'}
-          className="p-2 text-gray-500 hover:bg-gray-100 rounded-lg disabled:opacity-30 disabled:cursor-not-allowed transition-colors" title="Parent directory">
+          className="p-2 text-white/50 hover:bg-white/10 rounded-lg disabled:opacity-30 disabled:cursor-not-allowed transition-colors" title={t('files.parentDir', 'Parent directory')}>
           <ArrowUp size={18} />
         </button>
 
@@ -524,8 +534,8 @@ const FilesView = () => {
             <React.Fragment key={crumb.path}>
               {i > 0 && <ChevronRight size={14} className="text-gray-300 shrink-0" />}
               <button onClick={() => fetchFiles(crumb.path)}
-                className={cn('px-2 py-1 rounded hover:bg-gray-100 transition-colors shrink-0',
-                  i === breadcrumbs.length - 1 ? 'font-semibold text-blue-600' : 'text-gray-600')}>
+                className={cn('px-2 py-1 rounded hover:bg-white/10 transition-colors shrink-0',
+                  i === breadcrumbs.length - 1 ? 'font-semibold text-white' : 'text-white/70')}>
                 {crumb.label}
               </button>
             </React.Fragment>
@@ -533,10 +543,10 @@ const FilesView = () => {
         </div>
 
         <div className="relative shrink-0">
-          <Search size={16} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
+          <Search size={16} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-white/40" />
           <input value={search} onChange={e => setSearch(e.target.value)}
-            placeholder="Search..."
-            className="pl-8 pr-3 py-1.5 text-sm border border-gray-200 rounded-lg outline-none focus:ring-2 focus:ring-blue-500 w-40" />
+            placeholder={t('files.searchPlaceholder', 'Search...')}
+            className="pl-8 pr-3 py-1.5 text-sm border border-white/10 rounded-lg outline-none focus:ring-2 focus:ring-blue-500 w-40" />
         </div>
       </div>
 
@@ -544,45 +554,45 @@ const FilesView = () => {
         <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg flex items-center gap-3">
           <AlertCircle size={18} />
           <span className="text-sm">{error}</span>
-          <button onClick={() => fetchFiles(currentPath)} className="ml-auto underline text-sm font-medium">Retry</button>
+          <button onClick={() => fetchFiles(currentPath)} className="ml-auto underline text-sm font-medium">{t('files.retry', 'Retry')}</button>
         </div>
       )}
 
       {/* File Table */}
-      <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+      <div className="glass rounded-xl border border-white/10 overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-left">
-            <thead className="bg-gray-50 border-b border-gray-100">
+            <thead className="bg-white/5 border-b border-white/8">
               <tr>
-                <th className="px-4 py-3 text-xs font-bold text-gray-500 uppercase cursor-pointer hover:bg-gray-100 select-none" onClick={() => handleSort('name')}>
-                  Name {sortBy === 'name' && (sortAsc ? '↑' : '↓')}
+                <th className="px-4 py-3 text-xs font-bold text-white/50 uppercase cursor-pointer hover:bg-white/10 select-none" onClick={() => handleSort('name')}>
+                  {t('files.name', 'Name')} {sortBy === 'name' && (sortAsc ? '↑' : '↓')}
                 </th>
-                <th className="px-4 py-3 text-xs font-bold text-gray-500 uppercase cursor-pointer hover:bg-gray-100 select-none" onClick={() => handleSort('size')}>
-                  Size {sortBy === 'size' && (sortAsc ? '↑' : '↓')}
+                <th className="px-4 py-3 text-xs font-bold text-white/50 uppercase cursor-pointer hover:bg-white/10 select-none" onClick={() => handleSort('size')}>
+                  {t('files.size', 'Size')} {sortBy === 'size' && (sortAsc ? '↑' : '↓')}
                 </th>
-                <th className="px-4 py-3 text-xs font-bold text-gray-500 uppercase cursor-pointer hover:bg-gray-100 select-none" onClick={() => handleSort('mtime')}>
-                  Modified {sortBy === 'mtime' && (sortAsc ? '↑' : '↓')}
+                <th className="px-4 py-3 text-xs font-bold text-white/50 uppercase cursor-pointer hover:bg-white/10 select-none" onClick={() => handleSort('mtime')}>
+                  {t('files.modified', 'Modified')} {sortBy === 'mtime' && (sortAsc ? '↑' : '↓')}
                 </th>
-                <th className="px-4 py-3 text-xs font-bold text-gray-500 uppercase text-right">Actions</th>
+                <th className="px-4 py-3 text-xs font-bold text-white/50 uppercase text-right">{t('files.actions', 'Actions')}</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-50">
               {loading ? (
-                <tr><td colSpan="4" className="text-center py-16 text-gray-400">
-                  <RefreshCw size={24} className="animate-spin mx-auto mb-2" />Loading...
+                <tr><td colSpan="4" className="text-center py-16 text-white/40">
+                  <RefreshCw size={24} className="animate-spin mx-auto mb-2" />{t('files.loading', 'Loading...')}
                 </td></tr>
               ) : sortedFiles.length === 0 ? (
-                <tr><td colSpan="4" className="text-center py-16 text-gray-400 italic">
-                  {search ? 'No matching files.' : 'This directory is empty.'}
+                <tr><td colSpan="4" className="text-center py-16 text-white/40 italic">
+                  {search ? t('files.noMatch', 'No matching files.') : t('files.emptyDir', 'This directory is empty.')}
                 </td></tr>
               ) : sortedFiles.map((file) => (
-                <tr key={file.name} className="group hover:bg-blue-50/50 transition-colors">
+                <tr key={file.name} className="group hover:bg-white/5 transition-colors">
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-2.5">
                       {getIcon(file)}
                       <span className={cn(
                         "font-medium text-sm cursor-pointer truncate max-w-[280px]",
-                        file.dir ? 'text-blue-700' : 'text-gray-800'
+                        file.dir ? 'text-white' : 'text-white'
                       )}
                         onClick={() => navigate(file.name, file.dir)}
                         onDoubleClick={() => navigate(file.name, file.dir)}
@@ -592,24 +602,24 @@ const FilesView = () => {
                       </span>
                     </div>
                   </td>
-                  <td className="px-4 py-3 text-sm text-gray-500 font-mono">{file.dir ? '--' : formatSize(file.size)}</td>
-                  <td className="px-4 py-3 text-sm text-gray-500">{formatDate(file.mtime)}</td>
+                  <td className="px-4 py-3 text-sm text-white/50 font-mono">{file.dir ? '--' : formatSize(file.size)}</td>
+                  <td className="px-4 py-3 text-sm text-white/50">{formatDate(file.mtime)}</td>
                   <td className="px-4 py-3 text-right">
                     <div className="flex justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                       {file.dir ? (
                         <button onClick={() => navigate(file.name, true)}
-                          className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-md transition-colors" title="Open">
+                          className="p-1.5 text-white/40 hover:text-violet-300 hover:bg-white/10 rounded-md transition-colors" title={t('files.open', 'Open')}>
                           <FolderOpen size={15} />
                         </button>
                       ) : (
                         <>
                           <button onClick={() => setViewTarget(file)}
-                            className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-md transition-colors" title="View">
+                            className="p-1.5 text-white/40 hover:text-violet-300 hover:bg-white/10 rounded-md transition-colors" title={t('files.view', 'View')}>
                             <FileText size={15} />
                           </button>
                           {isTextFile(file.name) && (
                             <button onClick={() => setEditTarget(file)}
-                              className="p-1.5 text-gray-400 hover:text-orange-600 hover:bg-orange-50 rounded-md transition-colors" title="Edit">
+                              className="p-1.5 text-white/40 hover:text-orange-400 hover:bg-white/10 rounded-md transition-colors" title={t('files.edit', 'Edit')}>
                               <Edit2 size={15} />
                             </button>
                           )}
@@ -620,18 +630,18 @@ const FilesView = () => {
                               const url = URL.createObjectURL(new Blob([res.data]));
                               const a = document.createElement('a'); a.href = url; a.download = file.name; a.click();
                               URL.revokeObjectURL(url);
-                            } catch (e) { alert('Download failed: ' + (e.response?.data?.error || e.message)); }
-                          }} className="p-1.5 text-gray-400 hover:text-green-600 hover:bg-green-50 rounded-md transition-colors" title="Download">
+                            } catch (e) { alert(t('files.downloadFailed', 'Download failed') + ': ' + (e.response?.data?.error || e.message)); }
+                          }} className="p-1.5 text-white/40 hover:text-green-400 hover:bg-white/10 rounded-md transition-colors" title={t('files.download', 'Download')}>
                             <Download size={15} />
                           </button>
                         </>
                       )}
                       <button onClick={() => setRenameTarget(file)}
-                        className="p-1.5 text-gray-400 hover:text-orange-600 hover:bg-orange-50 rounded-md transition-colors" title="Rename">
+                        className="p-1.5 text-white/40 hover:text-orange-400 hover:bg-white/10 rounded-md transition-colors" title={t('files.rename', 'Rename')}>
                         <Edit2 size={15} />
                       </button>
                       <button onClick={() => setDeleteTarget(file)}
-                        className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-md transition-colors" title="Delete">
+                        className="p-1.5 text-white/40 hover:text-red-400 hover:bg-white/10 rounded-md transition-colors" title={t('files.delete', 'Delete')}>
                         <Trash2 size={15} />
                       </button>
                     </div>

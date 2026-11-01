@@ -461,21 +461,21 @@ const CopilotView = () => {
   return (
     <div className="flex h-[calc(100vh-80px)] gap-3">
       {/* 侧栏 */}
-      <div className="w-56 bg-white rounded-xl shadow-sm border border-gray-100 flex flex-col overflow-hidden shrink-0">
-        <div className="px-3 py-3 border-b border-gray-100 flex items-center justify-between">
-          <span className="text-xs font-semibold text-gray-500 uppercase">会话</span>
-          <button onClick={createSession} className="p-1.5 text-gray-400 hover:text-violet-600 hover:bg-violet-50 rounded-lg transition-colors" title="新建会话"><Plus size={14} /></button>
+      <div className="w-56 glass rounded-xl border border-white/10 flex flex-col overflow-hidden shrink-0">
+        <div className="px-3 py-3 border-b border-white/8 flex items-center justify-between">
+          <span className="text-xs font-semibold text-white/50 uppercase">会话</span>
+          <button onClick={createSession} className="p-1.5 text-white/40 hover:text-violet-600 hover:bg-violet-50 rounded-lg transition-colors" title="新建会话"><Plus size={14} /></button>
         </div>
         <div className="flex-1 overflow-y-auto">
           {sessions.map(s => (
             <div key={s.id} className="border-b border-gray-50 last:border-0">
               <div onClick={() => { setActiveSessionId(s.id); setRecallSessions(JSON.parse(s.recall_sessions || '[]')); }}
-                className={`group flex items-center gap-2 px-3 py-2.5 cursor-pointer hover:bg-gray-50 transition-colors ${activeSessionId === s.id ? 'bg-violet-50 border-r-2 border-violet-500' : ''}`}>
-                <MessageSquare size={14} className="text-gray-400 shrink-0" />
+                className={`group flex items-center gap-2 px-3 py-2.5 cursor-pointer hover:bg-white/5 transition-colors ${activeSessionId === s.id ? 'bg-violet-50 border-r-2 border-violet-500' : ''}`}>
+                <MessageSquare size={14} className="text-white/40 shrink-0" />
                 <span className="flex-1 text-xs text-gray-700 truncate">{s.name || '未命名'}</span>
                 {activeSessionId === s.id && (
                   <button onClick={e => { e.stopPropagation(); deleteSession(s.id); }}
-                    className="p-0.5 text-gray-400 hover:text-red-500 rounded transition-colors shrink-0"><Trash2 size={11} /></button>
+                    className="p-0.5 text-white/40 hover:text-red-500 rounded transition-colors shrink-0"><Trash2 size={11} /></button>
                 )}
                 <button onClick={e => {
                   e.stopPropagation();
@@ -486,7 +486,7 @@ const CopilotView = () => {
                       if (Array.isArray(res.data)) setExpandedMessages(prev => ({ ...prev, [s.id]: res.data }));
                     }).catch(() => {});
                   }
-                }} className="p-0.5 text-gray-400 hover:text-violet-600 rounded transition-colors shrink-0">
+                }} className="p-0.5 text-white/40 hover:text-violet-600 rounded transition-colors shrink-0">
                   <svg className={`w-3 h-3 transition-transform ${expandedSessions[s.id] ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
                   </svg>
@@ -497,7 +497,7 @@ const CopilotView = () => {
                   {(() => {
                     const msgs = expandedMessages[s.id] || [];
                     return msgs.slice(-5).map((m, i) => (
-                      <div key={i} className={`text-xs mb-1 ${m.role === 'user' ? 'text-blue-600' : 'text-gray-600'}`}>
+                      <div key={i} className={`text-xs mb-1 ${m.role === 'user' ? 'text-blue-600' : 'text-white/70'}`}>
                         <span className="font-medium">{m.role === 'user' ? '你' : 'AI'}:</span> {m.content.slice(0, 60)}{m.content.length > 60 ? '...' : ''}
                       </div>
                     ));
@@ -506,12 +506,12 @@ const CopilotView = () => {
               )}
             </div>
           ))}
-          {sessions.length === 0 && <div className="px-3 py-6 text-center text-xs text-gray-400">暂无会话</div>}
+          {sessions.length === 0 && <div className="px-3 py-6 text-center text-xs text-white/40">暂无会话</div>}
         </div>
 
         {sessions.length > 1 && (
-          <div className="px-3 py-2 border-t border-gray-100">
-            <button onClick={() => setSettingsOpen(true)} className="flex items-center gap-1.5 w-full text-xs text-gray-500 hover:text-violet-600 transition-colors">
+          <div className="px-3 py-2 border-t border-white/8">
+            <button onClick={() => setSettingsOpen(true)} className="flex items-center gap-1.5 w-full text-xs text-white/50 hover:text-violet-600 transition-colors">
               <ArrowLeftRight size={12} />
               <span>回忆 {(() => { const s = sessions.find(x => x.id === activeSessionId); return JSON.parse(s?.recall_sessions || '[]').length; })()}</span>
             </button>
@@ -520,34 +520,34 @@ const CopilotView = () => {
       </div>
 
       {/* 主聊天区 */}
-      <div className="flex-1 flex flex-col bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden min-w-0">
-        <div className="px-5 py-3 border-b border-gray-100 flex items-center gap-3">
+      <div className="flex-1 flex flex-col glass rounded-xl border border-white/10 overflow-hidden min-w-0">
+        <div className="px-5 py-3 border-b border-white/8 flex items-center gap-3">
           <div className="w-8 h-8 bg-gradient-to-br from-violet-500 to-purple-600 rounded-lg flex items-center justify-center shrink-0">
             <Sparkles className="text-white" size={16} />
           </div>
           <div className="flex-1 min-w-0">
-            <h1 className="text-lg font-semibold text-gray-800">Copilot</h1>
-            <p className="text-xs text-gray-400 truncate">
+            <h1 className="text-lg font-semibold text-white">Copilot</h1>
+            <p className="text-xs text-white/40 truncate">
               {activeProvider ? `${activeProvider.icon} ${activeProvider.name}` : '未选择'}
               {' · '}
               {activeModel || '—'}
             </p>
           </div>
-          <button onClick={() => setSettingsOpen(!settingsOpen)} className="p-2 text-gray-400 hover:text-violet-600 hover:bg-violet-50 rounded-lg transition-colors">
+          <button onClick={() => setSettingsOpen(!settingsOpen)} className="p-2 text-white/40 hover:text-violet-600 hover:bg-violet-50 rounded-lg transition-colors">
             <Settings size={18} />
           </button>
         </div>
 
         <div className="flex-1 overflow-y-auto p-4 space-y-4">
           {!activeSessionId && (
-            <div className="flex flex-col items-center justify-center h-full text-gray-400 space-y-3">
+            <div className="flex flex-col items-center justify-center h-full text-white/40 space-y-3">
               <div className="w-12 h-12 bg-violet-100 rounded-xl flex items-center justify-center"><Sparkles className="text-violet-500" size={24} /></div>
               <p className="text-sm">请选择或创建一个会话</p>
               <p className="text-xs text-gray-300">点击左侧 + 按钮创建新会话</p>
             </div>
           )}
           {activeSessionId && messages.length === 0 && (
-            <div className="flex flex-col items-center justify-center h-full text-gray-400 space-y-3">
+            <div className="flex flex-col items-center justify-center h-full text-white/40 space-y-3">
               <div className="w-12 h-12 bg-violet-100 rounded-xl flex items-center justify-center"><Sparkles className="text-violet-500" size={24} /></div>
               <p className="text-sm">开始与 Copilot 对话</p>
               <p className="text-xs text-gray-300">点击右上角 ⚙️ 选择 Provider</p>
@@ -561,7 +561,7 @@ const CopilotView = () => {
               <div className={`w-7 h-7 rounded-full flex items-center justify-center shrink-0 ${isAssistant ? 'bg-violet-500 text-white' : 'bg-blue-500 text-white'}`}>
                 {isAssistant ? <Bot size={14} /> : <User size={14} />}
               </div>
-              <div className={`max-w-[80%] px-4 py-2.5 rounded-2xl text-sm ${isAssistant ? 'bg-gray-100 text-gray-800 rounded-tl-sm markdown-body' : 'bg-blue-500 text-white rounded-tr-sm whitespace-pre-wrap'}`}>
+              <div className={`max-w-[80%] px-4 py-2.5 rounded-2xl text-sm ${isAssistant ? 'bg-white/10 text-white rounded-tl-sm markdown-body' : 'bg-blue-500 text-white rounded-tr-sm whitespace-pre-wrap'}`}>
                 {isAssistant ? (
                   <div
                     className="markdown-body"
@@ -589,7 +589,7 @@ const CopilotView = () => {
           {loading && (
             <div className="flex gap-3">
               <div className="w-7 h-7 rounded-full bg-violet-500 text-white flex items-center justify-center shrink-0"><Bot size={14} /></div>
-              <div className="bg-gray-100 rounded-2xl rounded-tl-sm px-4 py-3">
+              <div className="bg-white/10 rounded-2xl rounded-tl-sm px-4 py-3">
                 <div className="flex gap-1.5">
                   {[0, 150, 300].map(d => <span key={d} className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: `${d}ms` }} />)}
                 </div>
@@ -601,18 +601,18 @@ const CopilotView = () => {
 
         {error && <div className="mx-4 mb-2 px-4 py-2 bg-red-50 border border-red-200 text-red-600 text-sm rounded-lg">{error}</div>}
 
-        <div className="px-4 py-1.5 border-t border-gray-100 flex items-center gap-2">
-          <div className="flex-1 h-1 bg-gray-100 rounded-full overflow-hidden">
+        <div className="px-4 py-1.5 border-t border-white/8 flex items-center gap-2">
+          <div className="flex-1 h-1 bg-white/10 rounded-full overflow-hidden">
             <div className={`h-full rounded-full transition-all ${contextPercent > 80 ? 'bg-red-500' : contextPercent > 50 ? 'bg-yellow-500' : 'bg-violet-500'}`}
               style={{ width: `${contextPercent}%` }} />
           </div>
-          <span className="text-xs text-gray-400 shrink-0">{contextTokens.toLocaleString()} / {MAX_CONTEXT_TOKENS.toLocaleString()}</span>
+          <span className="text-xs text-white/40 shrink-0">{contextTokens.toLocaleString()} / {MAX_CONTEXT_TOKENS.toLocaleString()}</span>
           {recallSessions.length > 0 && (
             <span className="text-xs text-violet-500 shrink-0">+{recallSessions.length} 回忆会话</span>
           )}
         </div>
 
-        <div className="p-4 border-t border-gray-100">
+        <div className="p-4 border-t border-white/8">
           <div className="flex gap-2">
             <textarea
               value={input}
@@ -620,7 +620,7 @@ const CopilotView = () => {
               onKeyDown={handleKeyDown}
               rows={2}
               placeholder="输入消息… (Enter 发送，Shift+Enter 换行)"
-              className="flex-1 resize-none border border-gray-200 rounded-xl px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-violet-500 focus:border-transparent"
+              className="flex-1 resize-none border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-violet-500 focus:border-transparent"
               disabled={loading}
             />
             <button onClick={sendMessage} disabled={loading || !input.trim()}
@@ -634,13 +634,13 @@ const CopilotView = () => {
       {/* ===== 设置面板 ===== */}
       {settingsOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm" onClick={e => { if (e.target === e.currentTarget) setSettingsOpen(false); }}>
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg mx-4 overflow-hidden max-h-[85vh] flex flex-col">
-            <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between bg-gradient-to-r from-violet-50 to-purple-50 shrink-0">
+          <div className="glass rounded-2xl shadow-2xl w-full max-w-lg mx-4 overflow-hidden max-h-[85vh] flex flex-col">
+            <div className="px-6 py-4 border-b border-white/8 flex items-center justify-between bg-gradient-to-r from-violet-50 to-purple-50 shrink-0">
               <div>
-                <h2 className="font-bold text-gray-800 text-lg">Model Providers</h2>
-                <p className="text-xs text-gray-400 mt-0.5">选择 Provider 并配置 API Key</p>
+                <h2 className="font-bold text-white text-lg">Model Providers</h2>
+                <p className="text-xs text-white/40 mt-0.5">选择 Provider 并配置 API Key</p>
               </div>
-              <button onClick={() => setSettingsOpen(false)} className="text-gray-400 hover:text-gray-600 text-2xl leading-none">×</button>
+              <button onClick={() => setSettingsOpen(false)} className="text-white/40 hover:text-white/70 text-2xl leading-none">×</button>
             </div>
 
             <div className="flex-1 overflow-y-auto p-6 space-y-5">
@@ -653,7 +653,7 @@ const CopilotView = () => {
                     const prov = providers.find(p => p.id === id);
                     if (prov) selectProvider(prov);
                   }}
-                  className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm outline-none focus:ring-2 focus:ring-violet-500 bg-white"
+                  className="w-full px-3 py-2.5 border border-white/10 rounded-lg text-sm outline-none focus:ring-2 focus:ring-violet-500 bg-white"
                 >
                   {providers.map(p => (
                     <option key={p.id} value={p.id}>{p.icon} {p.name}{p._preset ? ' (预设)' : ''}</option>
@@ -667,17 +667,17 @@ const CopilotView = () => {
               </button>
 
               {showAddForm && (
-                <div className="p-4 bg-gray-50 rounded-lg space-y-3">
+                <div className="p-4 bg-white/5 rounded-lg space-y-3">
                   <div className="flex gap-2">
                     <input type="text" value={newName} onChange={e => setNewName(e.target.value)} placeholder="名称" maxLength={30}
-                      className="flex-1 px-3 py-2 border border-gray-200 rounded-lg text-sm outline-none focus:ring-2 focus:ring-violet-500" />
+                      className="flex-1 px-3 py-2 border border-white/10 rounded-lg text-sm outline-none focus:ring-2 focus:ring-violet-500" />
                     <input type="text" value={newIcon} onChange={e => setNewIcon(e.target.value)} placeholder="图标" maxLength={2}
-                      className="w-16 px-2 py-2 border border-gray-200 rounded-lg text-sm text-center outline-none focus:ring-2 focus:ring-violet-500" />
+                      className="w-16 px-2 py-2 border border-white/10 rounded-lg text-sm text-center outline-none focus:ring-2 focus:ring-violet-500" />
                   </div>
                   <input type="text" value={newBase} onChange={e => setNewBase(e.target.value)} placeholder="API Base URL (https://...)"
-                    className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm font-mono outline-none focus:ring-2 focus:ring-violet-500" />
+                    className="w-full px-3 py-2 border border-white/10 rounded-lg text-sm font-mono outline-none focus:ring-2 focus:ring-violet-500" />
                   <div className="flex justify-end gap-2">
-                    <button onClick={() => setShowAddForm(false)} className="px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-100 rounded-lg">取消</button>
+                    <button onClick={() => setShowAddForm(false)} className="px-3 py-1.5 text-sm text-white/70 hover:bg-white/10 rounded-lg">取消</button>
                     <button onClick={addProvider} disabled={savingNew || !newName.trim() || !newBase.trim()}
                       className="px-3 py-1.5 text-sm bg-violet-600 text-white rounded-lg hover:bg-violet-700 disabled:opacity-50">
                       {savingNew ? '创建中...' : '创建'}
@@ -689,23 +689,23 @@ const CopilotView = () => {
               {activeProvider && (
                 <>
                   <div>
-                    <label className="block text-xs font-medium text-gray-500 mb-1">API Base URL</label>
+                    <label className="block text-xs font-medium text-white/50 mb-1">API Base URL</label>
                     <input type="text" value={activeProvider.api_base || ''}
                       onChange={e => {
                         const updated = { ...activeProvider, api_base: e.target.value };
                         setActiveProvider(updated);
                         setProviders(prev => prev.map(p => p.id === activeProvider.id ? updated : p));
                       }}
-                      className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm font-mono outline-none focus:ring-2 focus:ring-violet-500" />
+                      className="w-full px-3 py-2 border border-white/10 rounded-lg text-sm font-mono outline-none focus:ring-2 focus:ring-violet-500" />
                   </div>
 
                   <div>
-                    <label className="block text-xs font-medium text-gray-500 mb-1">API Key</label>
+                    <label className="block text-xs font-medium text-white/50 mb-1">API Key</label>
                     <div className="flex gap-2">
                       <input type="password" value={editKey !== undefined ? editKey : (activeProvider.api_key || '')}
                         onChange={e => setEditKey(e.target.value)}
                         placeholder="sk-..."
-                        className="flex-1 px-3 py-2 border border-gray-200 rounded-lg text-sm font-mono outline-none focus:ring-2 focus:ring-violet-500" />
+                        className="flex-1 px-3 py-2 border border-white/10 rounded-lg text-sm font-mono outline-none focus:ring-2 focus:ring-violet-500" />
                       <button onClick={saveApiKey}
                         disabled={savingKey === activeProvider.id}
                         className="px-3 bg-violet-600 text-white rounded-lg text-sm hover:bg-violet-700 disabled:opacity-50 transition-colors">
@@ -715,7 +715,7 @@ const CopilotView = () => {
                   </div>
 
                   <div>
-                    <label className="block text-xs font-medium text-gray-500 mb-1">Model</label>
+                    <label className="block text-xs font-medium text-white/50 mb-1">Model</label>
                     <input type="text" value={activeModel}
                       onChange={e => {
                         setActiveModel(e.target.value);
@@ -728,16 +728,16 @@ const CopilotView = () => {
                         }
                       }}
                       placeholder="如：gpt-4o, claude-3-5-sonnet..."
-                      className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm font-mono outline-none focus:ring-2 focus:ring-violet-500" />
+                      className="w-full px-3 py-2 border border-white/10 rounded-lg text-sm font-mono outline-none focus:ring-2 focus:ring-violet-500" />
                   </div>
 
                   {allModels[activeProvider?.id] && Array.isArray(allModels[activeProvider.id]) && allModels[activeProvider.id].length > 0 && (
                     <div>
-                      <label className="block text-xs font-medium text-gray-500 mb-1">可用模型（点击选中）</label>
+                      <label className="block text-xs font-medium text-white/50 mb-1">可用模型（点击选中）</label>
                       <div className="max-h-32 overflow-y-auto space-y-1">
                         {allModels[activeProvider.id].map(m => (
                           <button key={m} onClick={() => setActiveModel(m)}
-                            className={`w-full text-left px-3 py-1.5 rounded-lg text-xs font-mono transition-colors ${activeModel === m ? 'bg-violet-100 text-violet-700' : 'hover:bg-gray-50 text-gray-600'}`}>
+                            className={`w-full text-left px-3 py-1.5 rounded-lg text-xs font-mono transition-colors ${activeModel === m ? 'bg-violet-100 text-violet-700' : 'hover:bg-white/5 text-white/70'}`}>
                             {m}
                           </button>
                         ))}
@@ -749,16 +749,16 @@ const CopilotView = () => {
                     <button onClick={() => { setFetching(true); loadModels(activeProvider).finally(() => setFetching(false)); }}
                       className="text-xs text-violet-600 hover:underline">加载模型列表</button>
                   )}
-                  {fetching && <p className="text-xs text-gray-400">加载中...</p>}
+                  {fetching && <p className="text-xs text-white/40">加载中...</p>}
 
                   {sessions.length > 1 && (
                     <div>
-                      <label className="block text-xs font-medium text-gray-500 mb-2 flex items-center gap-1.5">
+                      <label className="block text-xs font-medium text-white/50 mb-2 flex items-center gap-1.5">
                         <ArrowLeftRight size={12} />跨会话回忆（初始化 prompt 注入）
                       </label>
-                      <div className="max-h-32 overflow-y-auto space-y-1 border border-gray-200 rounded-lg p-2">
+                      <div className="max-h-32 overflow-y-auto space-y-1 border border-white/10 rounded-lg p-2">
                         {sessions.filter(s => s.id !== activeSessionId).map(s => (
-                          <label key={s.id} className="flex items-center gap-2 px-2 py-1.5 hover:bg-gray-50 rounded cursor-pointer">
+                          <label key={s.id} className="flex items-center gap-2 px-2 py-1.5 hover:bg-white/5 rounded cursor-pointer">
                             <input type="checkbox" checked={recallSessions.includes(s.id)} onChange={() => toggleRecallSession(s.id)}
                               className="rounded border-gray-300 text-violet-600 focus:ring-violet-500" />
                             <span className="text-xs text-gray-700">{s.name}</span>
@@ -769,14 +769,14 @@ const CopilotView = () => {
                         className="mt-2 w-full py-1.5 text-xs bg-violet-600 text-white rounded-lg hover:bg-violet-700 transition-colors">
                         保存回忆配置
                       </button>
-                      <p className="text-xs text-gray-400 mt-1">选中的会话最近 10 条消息将作为初始 prompt 上下文</p>
+                      <p className="text-xs text-white/40 mt-1">选中的会话最近 10 条消息将作为初始 prompt 上下文</p>
                     </div>
                   )}
                 </>
               )}
             </div>
 
-            <div className="px-6 py-4 border-t border-gray-100 flex justify-end shrink-0">
+            <div className="px-6 py-4 border-t border-white/8 flex justify-end shrink-0">
               <button onClick={() => setSettingsOpen(false)} className="px-4 py-2 bg-violet-600 text-white rounded-lg text-sm font-medium hover:bg-violet-700 transition-colors">完成</button>
             </div>
           </div>

@@ -100,6 +100,37 @@ func main() {
 
 		/*
 		 * ========================================================
+		 * 站点 (Nginx / SQLite)
+		 * ========================================================
+		 */
+
+		protected.GET(
+			"/sites/nginx",
+			panelApi.NginxStatusHandler,
+		)
+		protected.GET(
+			"/sites/nginx/sites",
+			panelApi.NginxSitesHandler,
+		)
+		protected.POST(
+			"/sites/nginx/site/:name/:action",
+			panelApi.NginxSiteAction,
+		)
+		protected.POST(
+			"/sites/nginx/:action",
+			panelApi.NginxServiceAction,
+		)
+		protected.GET(
+			"/sites/sql",
+			panelApi.SqlDBs,
+		)
+		protected.POST(
+			"/sites/sql/query",
+			panelApi.SqlQuery,
+		)
+
+		/*
+		 * ========================================================
 		 * 新闻
 		 * ========================================================
 		 */

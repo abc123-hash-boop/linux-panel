@@ -14,6 +14,7 @@ const Settings = lazy(() => import('./views/Settings'));
 const ProcessManager = lazy(() => import('./views/ProcessManager'));
 const Services = lazy(() => import('./views/Services'));
 const News = lazy(() => import('./views/News'));
+const Sites = lazy(() => import('./views/Sites'));
 const Login = lazy(() => import('./views/Login'));
 
 // Loading 占位
@@ -65,6 +66,7 @@ function App() {
           <Route path="tasks" element={<ProcessManager />} />
           <Route path="services" element={<Services />} />
           <Route path="news" element={<News />} />
+          <Route path="sites" element={<Sites />} />
           <Route path="*" element={<NotFound />} />
         </Route>
 

@@ -1,17 +1,18 @@
 import React from 'react';
-import { 
-  LayoutDashboard, 
-  Container, 
-  Files, 
+import {
+  LayoutDashboard,
+  Container,
+  Files,
   Terminal,
   Bot,
   Globe,
-  Settings, 
-  LogOut, 
+  Settings,
+  LogOut,
   Menu,
   List,
   Server,
   Newspaper,
+  Network,
 } from 'lucide-react';
 import { Link, useLocation, Outlet } from 'react-router-dom';
 import { clsx } from 'clsx';
@@ -75,6 +76,7 @@ const Sidebar = ({ isOpen, setIsOpen }) => {
             <NavItem to="/tasks" icon={List} label={t('nav.tasks', 'Task Manager')} active={location.pathname === '/tasks'} />
             <NavItem to="/services" icon={Server} label={t('nav.services', 'Services')} active={location.pathname === '/services'} />
             <NavItem to="/news" icon={Newspaper} label={t('nav.news', 'News')} active={location.pathname === '/news'} />
+            <NavItem to="/sites" icon={Network} label={t('nav.sites', 'Sites')} active={location.pathname === '/sites'} />
             <NavItem to="/settings" icon={Settings} label={t('nav.settings', 'Settings')} active={location.pathname === '/settings'} />
           </nav>
 

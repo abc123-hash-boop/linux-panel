@@ -1,0 +1,17 @@
+# Go
+node_modules/
+
+# Build
+dist/
+
+# Editor
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# logs
+*.log

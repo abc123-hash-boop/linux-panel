@@ -13,6 +13,9 @@ import {
   Search,
   FileWarning,
   Loader2,
+  Trash2,
+  Wrench,
+  Zap,
 } from 'lucide-react';
 import apiClient from '../api/client';
 import { useI18n } from '../i18n';
@@ -30,6 +33,55 @@ function fmtBytes(n) {
 }
 
 // ---------- Nginx Tab ----------
+const QUICK_TEMPLATES = [
+  { key: 'static', label: 'Static Site', hint: '静态网站 (HTML/CSS/JS)' },
+  { key: 'proxy', label: 'Reverse Proxy', hint: '反向代理 (Node/Python/...)' },
+  { key: 'php', label: 'PHP App', hint: 'PHP 应用 (需安装 php-fpm)' },
+];
+
+const TEMPLATE_CONTENT = {
+  static: (name, domain, port) => `server {
+    listen ${port};
+    server_name ${domain};
+
+    root /var/www/${name.replace('.conf', '')};
+    index index.html index.htm;
+
+    location / {
+        try_files $uri $uri/ =404;
+    }
+}`,
+  proxy: (name, domain, port, target) => `server {
+    listen ${port};
+    server_name ${domain};
+
+    location / {
+        proxy_pass ${target};
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}`,
+  php: (name, domain, port) => `server {
+    listen ${port};
+    server_name ${domain};
+
+    root /var/www/${name.replace('.conf', '')};
+    index index.php index.html;
+
+    location / {
+        try_files $uri $uri/ =404;
+    }
+
+    location ~ \\.php$ {
+        fastcgi_pass unix:/run/php/php-fpm.sock;
+        fastcgi_index index.php;
+        fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
+        include fastcgi_params;
+    }
+}`,
+};
 function NginxTab() {
   const { t } = useI18n();
   const [status, setStatus] = useState(null);
@@ -38,16 +90,13 @@ function NginxTab() {
   const [actionMsg, setActionMsg] = useState(null);
   const [loading, setLoading] = useState(true);
   const [showCreate, setShowCreate] = useState(false);
+  const [createMode, setCreateMode] = useState('quick'); // 'quick' | 'expert'
   const [newSiteName, setNewSiteName] = useState('');
-  const [newSiteContent, setNewSiteContent] = useState(`server {
-    listen 80;
-    server_name example.com;
-
-    location / {
-        root /var/www/html;
-        index index.html index.htm;
-    }
-}`);
+  const [quickDomain, setQuickDomain] = useState('example.com');
+  const [quickPort, setQuickPort] = useState('80');
+  const [quickTemplate, setQuickTemplate] = useState('static');
+  const [quickTarget, setQuickTarget] = useState('http://127.0.0.1:3000');
+  const [newSiteContent, setNewSiteContent] = useState('');
   const [createErr, setCreateErr] = useState(null);
 
   const fetchAll = async () => {
@@ -186,47 +235,159 @@ function NginxTab() {
         {/* 新建站点弹窗/面板 */}
         {showCreate && (
           <div className="mb-5 glass-input p-4 rounded-xl space-y-3 animate-fade-in border border-violet-500/30">
-            <h4 className="text-sm font-semibold text-white">{t('sites.nginx.createSite', '新建 Nginx 站点')}</h4>
+            <div className="flex items-center justify-between">
+              <h4 className="text-sm font-semibold text-white flex items-center gap-2">
+                <Zap size={15} className="text-violet-300" />
+                {t('sites.nginx.createSite', '新建 Nginx 站点')}
+              </h4>
+              {/* 模式切换 */}
+              <div className="flex gap-1">
+                <button
+                  onClick={() => { setCreateMode('quick'); setNewSiteContent(TEMPLATE_CONTENT[quickTemplate](newSiteName || 'mysite', quickDomain, quickPort, quickTarget)); }}
+                  className={cn('px-3 py-1 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-all',
+                    createMode === 'quick'
+                      ? 'bg-gradient-to-br from-violet-500/25 to-indigo-500/15 border border-violet-500/40 text-white'
+                      : 'border border-white/10 text-white/50 hover:text-white/80')}
+                >
+                  <Zap size={12} />
+                  {t('sites.nginx.quickMode', '简易模式')}
+                </button>
+                <button
+                  onClick={() => setCreateMode('expert')}
+                  className={cn('px-3 py-1 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-all',
+                    createMode === 'expert'
+                      ? 'bg-gradient-to-br from-violet-500/25 to-indigo-500/15 border border-violet-500/40 text-white'
+                      : 'border border-white/10 text-white/50 hover:text-white/80')}
+                >
+                  <Wrench size={12} />
+                  {t('sites.nginx.expertMode', '专家模式')}
+                </button>
+              </div>
+            </div>
+
             <div>
-              <label className="text-xs text-white/60 block mb-1">{t('sites.nginx.siteName', '站点配置文件名 (如 myapp.conf)')}</label>
+              <label className="text-xs text-white/60 block mb-1">{t('sites.nginx.siteName', '配置文件名 (如 mysite.conf)')}</label>
               <input
                 type="text"
                 value={newSiteName}
-                onChange={(e) => setNewSiteName(e.target.value)}
-                placeholder="myapp.conf"
+                onChange={(e) => {
+                  const v = e.target.value;
+                  setNewSiteName(v);
+                  if (createMode === 'quick') {
+                    setNewSiteContent(TEMPLATE_CONTENT[quickTemplate](v || 'mysite', quickDomain, quickPort, quickTarget));
+                  }
+                }}
+                placeholder="mysite.conf"
                 className="glass-input w-full px-3 py-2 rounded-lg text-sm outline-none"
               />
             </div>
+
+            {createMode === 'quick' && (
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                <div>
+                  <label className="text-xs text-white/60 block mb-1">{t('sites.nginx.template', '站点类型')}</label>
+                  <div className="flex flex-col gap-1.5">
+                    {QUICK_TEMPLATES.map((tpl) => (
+                      <button
+                        key={tpl.key}
+                        onClick={() => {
+                          setQuickTemplate(tpl.key);
+                          setNewSiteContent(TEMPLATE_CONTENT[tpl.key](newSiteName || 'mysite', quickDomain, quickPort, quickTarget));
+                        }}
+                        className={cn('px-3 py-1.5 rounded-lg text-xs flex items-center justify-between transition-all text-left',
+                          quickTemplate === tpl.key
+                            ? 'bg-violet-500/15 border border-violet-500/40 text-white'
+                            : 'border border-white/10 text-white/50 hover:text-white/80')}
+                      >
+                        <span>{tpl.label}</span>
+                        <span className="text-white/30 text-[10px]">{tpl.hint}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div>
+                  <label className="text-xs text-white/60 block mb-1">{t('sites.nginx.domain', '域名 (server_name)')}</label>
+                  <input
+                    type="text"
+                    value={quickDomain}
+                    onChange={(e) => {
+                      setQuickDomain(e.target.value);
+                      setNewSiteContent(TEMPLATE_CONTENT[quickTemplate](newSiteName || 'mysite', e.target.value, quickPort, quickTarget));
+                    }}
+                    placeholder="example.com"
+                    className="glass-input w-full px-3 py-2 rounded-lg text-sm outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs text-white/60 block mb-1">{t('sites.nginx.port', '端口')}</label>
+                  <input
+                    type="text"
+                    value={quickPort}
+                    onChange={(e) => {
+                      setQuickPort(e.target.value);
+                      setNewSiteContent(TEMPLATE_CONTENT[quickTemplate](newSiteName || 'mysite', quickDomain, e.target.value, quickTarget));
+                    }}
+                    placeholder="80"
+                    className="glass-input w-full px-3 py-2 rounded-lg text-sm outline-none"
+                  />
+                </div>
+                {quickTemplate === 'proxy' && (
+                  <div className="md:col-span-3">
+                    <label className="text-xs text-white/60 block mb-1">{t('sites.nginx.proxyTarget', '代理目标 (如 http://127.0.0.1:3000)')}</label>
+                    <input
+                      type="text"
+                      value={quickTarget}
+                      onChange={(e) => {
+                        setQuickTarget(e.target.value);
+                        setNewSiteContent(TEMPLATE_CONTENT['proxy'](newSiteName || 'mysite', quickDomain, quickPort, e.target.value));
+                      }}
+                      placeholder="http://127.0.0.1:3000"
+                      className="glass-input w-full px-3 py-2 rounded-lg text-sm outline-none"
+                    />
+                  </div>
+                )}
+              </div>
+            )}
+
             <div>
-              <label className="text-xs text-white/60 block mb-1">{t('sites.nginx.siteContent', 'Nginx 配置内容')}</label>
+              <label className="text-xs text-white/60 block mb-1">
+                {t('sites.nginx.siteContent', 'Nginx 配置内容')}
+                {createMode === 'quick' && <span className="text-white/30 ml-2">({t('sites.nginx.autoGen', '自动生成的配置')})</span>}
+              </label>
               <textarea
                 value={newSiteContent}
                 onChange={(e) => setNewSiteContent(e.target.value)}
-                rows={8}
+                rows={createMode === 'expert' ? 10 : 6}
                 spellCheck={false}
-                className="glass-input w-full px-3 py-2 rounded-lg text-xs font-mono outline-none resize-y"
+                readOnly={createMode === 'quick'}
+                className={cn('glass-input w-full px-3 py-2 rounded-lg text-xs font-mono outline-none resize-y',
+                  createMode === 'quick' ? 'bg-white/5 text-white/70' : '')}
               />
             </div>
+
             {createErr && <p className="text-xs text-red-300">{createErr}</p>}
             <div className="flex justify-end gap-2">
-              <button onClick={() => setShowCreate(false)} className="glass-btn px-3 py-1.5 rounded-lg text-xs text-white/70">
+              <button onClick={() => { setShowCreate(false); setCreateErr(null); }} className="glass-btn px-3 py-1.5 rounded-lg text-xs text-white/70">
                 {t('sites.cancel', '取消')}
               </button>
               <button
                 onClick={async () => {
-                  if (!newSiteName.trim()) { setCreateErr('Filename required'); return; }
+                  const name = newSiteName.trim() ? (newSiteName.endsWith('.conf') ? newSiteName : newSiteName + '.conf') : '';
+                  if (!name) { setCreateErr(t('sites.nginx.nameRequired', '请填写配置文件名')); return; }
                   try {
                     setCreateErr(null);
-                    await apiClient.post('/sites/nginx/site/create', { name: newSiteName, content: newSiteContent });
+                    await apiClient.post('/sites/nginx/site/create', { name, content: newSiteContent });
                     setShowCreate(false);
                     setNewSiteName('');
+                    setNewSiteContent('');
                     fetchAll();
                   } catch (e) {
                     setCreateErr(e.response?.data?.error || String(e));
                   }
                 }}
-                className="glass-btn-primary px-4 py-1.5 rounded-lg text-xs font-medium"
+                className="glass-btn-primary px-4 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1.5"
               >
+                <CheckCircle2 size={13} />
                 {t('sites.saveCreate', '创建并重载')}
               </button>
             </div>
@@ -258,6 +419,18 @@ function NginxTab() {
                 >
                   <ChevronRight size={12} />
                   {s.enabled ? t('sites.nginx.disable', '停用') : t('sites.nginx.enable', '启用')}
+                </button>
+                <button
+                  onClick={() => {
+                    if (window.confirm(t('sites.nginx.deleteConfirm', '确定删除站点 "{name}"？').replace('{name}', s.name))) {
+                      doSite(s.name, 'delete');
+                    }
+                  }}
+                  disabled={!!busy}
+                  className="glass-btn p-1.5 rounded-lg text-white/40 hover:text-red-300 disabled:opacity-50"
+                  title={t('sites.nginx.delete', '删除')}
+                >
+                  <Trash2 size={13} />
                 </button>
               </div>
             ))}

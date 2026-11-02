@@ -56,6 +56,11 @@ func NginxSiteAction(c *gin.Context) {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
+	case "delete":
+		if err := service.NginxDeleteSite(name); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
 	default:
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid action: " + action})
 		return

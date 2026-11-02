@@ -133,6 +133,10 @@ func NginxEnableSite(name string) error {
 	return NginxReload()
 }
 
+func NginxReload() error {
+	return NginxAction("reload")
+}
+
 func NginxDisableSite(name string) error {
 	enabled := "/etc/nginx/sites-enabled"
 	dst := filepath.Join(enabled, name)
@@ -203,8 +207,33 @@ func NginxCreateSite(name, content string) error {
 	return NginxReload()
 }
 
-func NginxReload() error {
-	return NginxAction("reload")
+func NginxDeleteSite(name string) error {
+	availDir := "/etc/nginx/sites-available"
+	enabledDir := "/etc/nginx/sites-enabled"
+
+	avail := filepath.Join(availDir, name)
+	enabled := filepath.Join(enabledDir, name)
+
+	if _, err := os.Stat(avail); err != nil {
+		alt := filepath.Join("/etc/nginx/conf.d", name)
+		if _, err2 := os.Stat(alt); err2 == nil {
+			if err := os.Remove(alt); err != nil {
+				return err
+			}
+		} else {
+			return err
+		}
+	} else {
+		if err := os.Remove(avail); err != nil {
+			return err
+		}
+	}
+
+	if _, err := os.Lstat(enabled); err == nil {
+		_ = os.Remove(enabled)
+	}
+
+	return NginxReload()
 }
 
 func nginxInstalled() bool {

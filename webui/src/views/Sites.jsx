@@ -32,6 +32,11 @@ function fmtBytes(n) {
 // ---------- Nginx Tab ----------
 function NginxTab() {
   const { t } = useI18n();
+  const [status, setStatus] = useState(null);
+  const [sites, setSites] = useState([]);
+  const [busy, setBusy] = useState(null); // {site, action}
+  const [actionMsg, setActionMsg] = useState(null);
+  const [loading, setLoading] = useState(true);
   const [showCreate, setShowCreate] = useState(false);
   const [newSiteName, setNewSiteName] = useState('');
   const [newSiteContent, setNewSiteContent] = useState(`server {

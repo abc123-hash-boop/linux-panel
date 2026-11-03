@@ -132,6 +132,18 @@ func main() {
 			"/sites/sql/query",
 			panelApi.SqlQuery,
 		)
+		protected.POST(
+			"/sites/sql/create",
+			panelApi.SqlCreateDB,
+		)
+		protected.POST(
+			"/sites/sql/delete",
+			panelApi.SqlDeleteDB,
+		)
+		protected.POST(
+			"/sites/nginx/site/create",
+			panelApi.CreateSite,
+		)
 
 		/*
 		 * ========================================================

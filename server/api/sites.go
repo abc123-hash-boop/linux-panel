@@ -109,3 +109,82 @@ func SqlQuery(c *gin.Context) {
 
 	c.JSON(http.StatusOK, res)
 }
+
+// SqlCreateDB POST /api/sites/sql/create  { "name": "mysite", "password": "..." }
+func SqlCreateDB(c *gin.Context) {
+	var req struct {
+		Name     string `json:"name"`
+		Password string `json:"password"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if req.Name == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "database name required"})
+		return
+	}
+
+	res, err := service.SqlCreateDB(req)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, res)
+}
+
+// SqlDeleteDB POST /api/sites/sql/delete { "path": "..." }
+func SqlDeleteDB(c *gin.Context) {
+	var req struct {
+		Path string `json:"path"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if err := service.SqlDeleteDB(req.Path); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true})
+}
+
+// CreateSite POST /api/sites/nginx/site/create { name, content, dbName, dbPassword }
+func CreateSite(c *gin.Context) {
+	var req struct {
+		Name     string `json:"name"`
+		Content  string `json:"content"`
+		DBName   string `json:"dbName"`   // optional: SQLite database name (for PHP)
+		DBPasswd string `json:"dbPassword"` // optional: custom password (auto-generate if empty)
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	// 如果是 PHP 模式且需要数据库，先创建数据库
+	var dbPath string
+	if req.DBName != "" {
+		dbRes, err := service.SqlCreateDB(service.CreateDBRequest{
+			Name:     req.DBName,
+			Password: req.DBPasswd,
+		})
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create database: " + err.Error()})
+			return
+		}
+		dbPath = dbRes.Path
+	}
+
+	// 写入并启用站点
+	if err := service.NginxCreateSite(req.Name, req.Content); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"dbPath":  dbPath,
+	})
+}

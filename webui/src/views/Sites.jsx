@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import {
   Server,
-  Database,
   RefreshCw,
   Play,
   Square,
@@ -63,7 +62,17 @@ const TEMPLATE_CONTENT = {
         proxy_set_header X-Forwarded-Proto $scheme;
     }
 }`,
-  php: (name, domain, port) => `server {
+  php: (name, domain, port, dbName, dbPasswd) => {
+    const phpDBConfig = dbName
+      ? `
+    # 附加数据库连接 (PHP 使用)
+    # DB_PATH=${dbPath}
+    # DB_USER=admin
+    # DB_PASS=${dbPasswd}
+    `
+      : '';
+
+    return `server {
     listen ${port};
     server_name ${domain};
 
@@ -80,7 +89,8 @@ const TEMPLATE_CONTENT = {
         fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
         include fastcgi_params;
     }
-}`,
+}${phpDBConfig}`;
+  },
 };
 function NginxTab() {
   const { t } = useI18n();
@@ -96,8 +106,27 @@ function NginxTab() {
   const [quickPort, setQuickPort] = useState('80');
   const [quickTemplate, setQuickTemplate] = useState('static');
   const [quickTarget, setQuickTarget] = useState('http://127.0.0.1:3000');
+  // 附加数据库（仅 PHP 模式）
+  const [useDatabase, setUseDatabase] = useState(false);
+  const [dbName, setDbName] = useState('');
+  const [dbPassword, setDbPassword] = useState('');
+  const [randomPass, setRandomPass] = useState('');
   const [newSiteContent, setNewSiteContent] = useState('');
   const [createErr, setCreateErr] = useState(null);
+
+  // 更新快速建站的配置内容（支持 DB 字段）
+  const updateQuickContent = () => {
+    setNewSiteContent(
+      TEMPLATE_CONTENT[quickTemplate](
+        newSiteName || 'mysite',
+        quickDomain,
+        quickPort,
+        quickTarget,
+        useDatabase ? dbName : '',
+        useDatabase ? (dbPassword || randomPass) : ''
+      )
+    );
+  };
 
   const fetchAll = async () => {
     try {
@@ -243,7 +272,10 @@ function NginxTab() {
               {/* 模式切换 */}
               <div className="flex gap-1">
                 <button
-                  onClick={() => { setCreateMode('quick'); setNewSiteContent(TEMPLATE_CONTENT[quickTemplate](newSiteName || 'mysite', quickDomain, quickPort, quickTarget)); }}
+                  onClick={() => {
+                    setCreateMode('quick');
+                    updateQuickContent();
+                  }}
                   className={cn('px-3 py-1 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-all',
                     createMode === 'quick'
                       ? 'bg-gradient-to-br from-violet-500/25 to-indigo-500/15 border border-violet-500/40 text-white'
@@ -274,7 +306,7 @@ function NginxTab() {
                   const v = e.target.value;
                   setNewSiteName(v);
                   if (createMode === 'quick') {
-                    setNewSiteContent(TEMPLATE_CONTENT[quickTemplate](v || 'mysite', quickDomain, quickPort, quickTarget));
+                    updateQuickContent();
                   }
                 }}
                 placeholder="mysite.conf"
@@ -292,7 +324,7 @@ function NginxTab() {
                         key={tpl.key}
                         onClick={() => {
                           setQuickTemplate(tpl.key);
-                          setNewSiteContent(TEMPLATE_CONTENT[tpl.key](newSiteName || 'mysite', quickDomain, quickPort, quickTarget));
+                          updateQuickContent();
                         }}
                         className={cn('px-3 py-1.5 rounded-lg text-xs flex items-center justify-between transition-all text-left',
                           quickTemplate === tpl.key
@@ -312,7 +344,7 @@ function NginxTab() {
                     value={quickDomain}
                     onChange={(e) => {
                       setQuickDomain(e.target.value);
-                      setNewSiteContent(TEMPLATE_CONTENT[quickTemplate](newSiteName || 'mysite', e.target.value, quickPort, quickTarget));
+                      updateQuickContent();
                     }}
                     placeholder="example.com"
                     className="glass-input w-full px-3 py-2 rounded-lg text-sm outline-none"
@@ -325,7 +357,7 @@ function NginxTab() {
                     value={quickPort}
                     onChange={(e) => {
                       setQuickPort(e.target.value);
-                      setNewSiteContent(TEMPLATE_CONTENT[quickTemplate](newSiteName || 'mysite', quickDomain, e.target.value, quickTarget));
+                      updateQuickContent();
                     }}
                     placeholder="80"
                     className="glass-input w-full px-3 py-2 rounded-lg text-sm outline-none"
@@ -339,7 +371,7 @@ function NginxTab() {
                       value={quickTarget}
                       onChange={(e) => {
                         setQuickTarget(e.target.value);
-                        setNewSiteContent(TEMPLATE_CONTENT['proxy'](newSiteName || 'mysite', quickDomain, quickPort, e.target.value));
+                        updateQuickContent();
                       }}
                       placeholder="http://127.0.0.1:3000"
                       className="glass-input w-full px-3 py-2 rounded-lg text-sm outline-none"
@@ -349,7 +381,82 @@ function NginxTab() {
               </div>
             )}
 
-            <div>
+            
+
+                {/* 附加数据库（仅 PHP 模式） */}
+                {quickTemplate === 'php' && (
+                  <div className="md:col-span-3 space-y-3">
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        id="attachDb"
+                        checked={useDatabase}
+                        onChange={(e) => {
+                          setUseDatabase(e.target.checked);
+                          setDbName('');
+                          setDbPassword('');
+                          setRandomPass('');
+                          updateQuickContent();
+                        }}
+                        className="w-4 h-4 rounded border-white/20 bg-white/5 text-violet-500 focus:ring-violet-500/50"
+                      />
+                      <label htmlFor="attachDb" className="text-sm text-white/80 select-none">
+                        {t('sites.nginx.attachDatabase', '附加可选数据库')}
+                      </label>
+                    </div>
+
+                    {useDatabase && (
+                      <>
+                        <div>
+                          <label className="text-xs text-white/60 block mb-1">{t('sites.nginx.dbName', '数据库名称')}</label>
+                          <input
+                            type="text"
+                            value={dbName}
+                            onChange={(e) => { setDbName(e.target.value); updateQuickContent(); }}
+                            placeholder={t('sites.nginx.dbNamePlace', 'mysite')}
+                            className="glass-input w-full px-3 py-2 rounded-lg text-sm outline-none"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="text-xs text-white/60 block mb-1">{t('sites.nginx.dbPassword', '数据库密码')}</label>
+                          <div className="flex gap-2">
+                            <input
+                              type="text"
+                              value={dbPassword || randomPass}
+                              onChange={(e) => {
+                                setDbPassword(e.target.value);
+                                setRandomPass('');
+                                updateQuickContent();
+                              }}
+                              placeholder={t('sites.nginx.dbPassPlace', '留空则自动生成')}
+                              className="glass-input flex-1 px-3 py-2 rounded-lg text-sm outline-none font-mono"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const pass = 'Aa1!' + Math.random().toString(36).slice(2, 10) + Math.random().toString(36).slice(2, 8);
+                                setRandomPass(pass);
+                                setDbPassword('');
+                                updateQuickContent();
+                              }}
+                              className="glass-btn px-3 py-2 rounded-lg text-xs font-medium flex items-center gap-1.5 text-violet-300 whitespace-nowrap"
+                            >
+                              <RefreshCw size={13} className={cn(!randomPass && 'animate-spin')} />
+                              {t('sites.nginx.randomPass', '随机生成')}
+                            </button>
+                          </div>
+                          <p className="text-[10px] text-white/40 mt-1">
+                            {dbPassword ? t('sites.nginx.dbPassCustom', '使用自定义密码') :
+                              randomPass ? t('sites.nginx.dbPassGen', '已生成随机密码，可随时修改') :
+                              t('sites.nginx.dbPassHint', '留空自动生成强密码，或点击随机生成')}
+                          </p>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                )}
+<div>
               <label className="text-xs text-white/60 block mb-1">
                 {t('sites.nginx.siteContent', 'Nginx 配置内容')}
                 {createMode === 'quick' && <span className="text-white/30 ml-2">({t('sites.nginx.autoGen', '自动生成的配置')})</span>}
@@ -372,13 +479,31 @@ function NginxTab() {
               </button>
               <button
                 onClick={async () => {
+                  if (!window.confirm(t('sites.nginx.createConfirm', '确定创建站点 "{name}"？').replace('{name}', newSiteName || 'mysite'))) return;
                   const name = newSiteName.trim() ? (newSiteName.endsWith('.conf') ? newSiteName : newSiteName + '.conf') : '';
                   if (!name) { setCreateErr(t('sites.nginx.nameRequired', '请填写配置文件名')); return; }
                   try {
                     setCreateErr(null);
-                    await apiClient.post('/sites/nginx/site/create', { name, content: newSiteContent });
+                    const payload = { name, content: newSiteContent };
+                    if (quickTemplate === 'php' && useDatabase && dbName) {
+                      payload.dbName = dbName;
+                      payload.dbPassword = dbPassword || randomPass;
+                    }
+                    const res = await apiClient.post('/sites/nginx/site/create', payload);
+                    const info = [t('sites.nginx.createOk', '创建成功！')];
+                    if (res.data.dbPath) info.push(t('sites.nginx.dbCreated', '附加数据库：{path}').replace('{path}', res.data.dbPath));
+                    if (payload.dbPassword) info.push(t('sites.nginx.dbPasswordInfo', '密码：{pass}').replace('{pass}', payload.dbPassword));
+                    alert(info.join(' · '));
                     setShowCreate(false);
                     setNewSiteName('');
+                    setQuickDomain('example.com');
+                    setQuickPort('80');
+                    setQuickTemplate('static');
+                    setQuickTarget('http://127.0.0.1:3000');
+                    setUseDatabase(false);
+                    setDbName('');
+                    setDbPassword('');
+                    setRandomPass('');
                     setNewSiteContent('');
                     fetchAll();
                   } catch (e) {
@@ -442,183 +567,12 @@ function NginxTab() {
 }
 
 // ---------- SQLite Tab ----------
-function SqlTab() {
-  const { t } = useI18n();
-  const [dbs, setDbs] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [sel, setSel] = useState(null); // 选中的 db
-  const [query, setQuery] = useState('');
-  const [result, setResult] = useState(null);
-  const [running, setRunning] = useState(false);
-  const [expanded, setExpanded] = useState({});
 
-  const fetchDBs = async () => {
-    try {
-      setLoading(true);
-      const res = await apiClient.get('/sites/sql');
-      setDbs(res.data || []);
-    } catch (e) {
-      console.error('sql db list failed:', e);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => { fetchDBs(); }, []);
-
-  const selectDB = (db) => {
-    setSel(db);
-    setResult(null);
-    setQuery(`SELECT * FROM ${db.tables[0]?.name || ''} LIMIT 50`);
-  };
-
-  const runQuery = async () => {
-    if (!sel || !query.trim()) return;
-    setRunning(true);
-    setResult(null);
-    try {
-      const res = await apiClient.post('/sites/sql/query', { path: sel.path, query });
-      setResult(res.data);
-    } catch (e) {
-      setResult({ error: e.response?.data?.error || String(e) });
-    } finally {
-      setRunning(false);
-    }
-  };
-
-  const cols = result?.columns || [];
-  const rows = result?.rows || [];
-
-  return (
-    <div className="space-y-5 animate-fade-in">
-      <div className="flex items-center justify-between">
-        <h3 className="text-base font-semibold text-white flex items-center gap-2">
-          <Database size={16} className="text-white/50" />
-          {t('sites.sql.dbs', '数据库文件')}
-          <span className="text-xs text-white/40 font-normal">{dbs.length}</span>
-        </h3>
-        <button onClick={fetchDBs} className="glass-btn p-1.5 rounded-lg text-white/60 hover:text-white">
-          <RefreshCw size={14} className={cn(loading && 'animate-spin')} />
-        </button>
-      </div>
-
-      {loading ? (
-        <div className="text-center py-8 text-white/40 text-sm">{t('sites.sql.scanning', '正在扫描数据库文件...')}</div>
-      ) : dbs.length === 0 ? (
-        <p className="text-sm text-white/40 text-center py-8">{t('sites.sql.none', '未找到数据库文件')}</p>
-      ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-          {dbs.map((db) => (
-            <button
-              key={db.path}
-              onClick={() => selectDB(db)}
-              className={cn('glass-strong p-4 rounded-xl text-left transition-all hover:-translate-y-0.5',
-                sel?.path === db.path ? 'ring-2 ring-violet-500/50 border-violet-500/30' : 'hover:border-white/20')}
-            >
-              <div className="flex items-center gap-2 mb-1.5">
-                <Database size={16} className={sel?.path === db.path ? 'text-violet-300' : 'text-white/40'} />
-                <span className="text-sm font-medium text-white truncate flex-1">{db.path.split('/').pop()}</span>
-                <span className="text-xs text-white/40 shrink-0">{fmtBytes(db.size)}</span>
-              </div>
-              <p className="text-xs text-white/40 truncate mb-2">{db.path}</p>
-              <p className="text-xs text-white/50">{t('sites.sql.tables', '表')}: {db.tables.length}
-                {db.tables[0] && <span className="text-white/30"> · {db.tables[0].name}</span>}
-              </p>
-            </button>
-          ))}
-        </div>
-      )}
-
-      {/* 查询面板 */}
-      {sel && (
-        <div className="glass-strong p-5 rounded-2xl space-y-4">
-          <div className="flex items-center gap-2 text-sm">
-            <Terminal size={15} className="text-violet-300" />
-            <span className="text-white/70 font-medium truncate flex-1">{sel.path}</span>
-            <button onClick={() => setExpanded((m) => ({ ...m, [sel.path]: !m[sel.path] }))} className="text-white/40 hover:text-white/70 text-xs">
-              {expanded[sel.path] ? t('sites.sql.hideSchema', '隐藏表结构') : t('sites.sql.showSchema', '表结构')}
-            </button>
-          </div>
-
-          {expanded[sel.path] && (
-            <div className="glass-input rounded-lg p-3 space-y-1.5">
-              {sel.tables.map((tb) => (
-                <div key={tb.name} className="flex items-center gap-2 text-xs">
-                  <span className="text-violet-300 font-mono font-medium">{tb.name}</span>
-                  <span className="text-white/40">{t('sites.sql.rows', '行数')} {tb.rows}</span>
-                </div>
-              ))}
-            </div>
-          )}
-
-          <div>
-            <textarea
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              rows={3}
-              spellCheck={false}
-              placeholder={t('sites.sql.placeholder', "SELECT * FROM table_name;")}
-              className="glass-input w-full rounded-xl px-4 py-3 text-sm font-mono outline-none resize-y min-h-[60px]"
-            />
-          </div>
-
-          <button
-            onClick={runQuery}
-            disabled={running}
-            className="glass-btn-primary px-4 py-2 rounded-xl text-sm font-medium flex items-center gap-2 disabled:opacity-50"
-          >
-            {running ? <Loader2 size={15} className="animate-spin" /> : <Terminal size={15} />}
-            {t('sites.sql.run', '执行查询')}
-          </button>
-
-          {result?.error && (
-            <pre className="text-xs text-red-300 bg-red-500/10 border border-red-500/30 rounded-lg p-3 whitespace-pre-wrap overflow-x-auto">
-              {result.error}
-            </pre>
-          )}
-
-          {result && !result.error && (
-            <div className="overflow-x-auto rounded-xl border border-white/10">
-              {rows.length === 0 ? (
-                <p className="text-sm text-white/40 py-6 text-center">{result.message || t('sites.sql.empty', '无数据')}</p>
-              ) : (
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="glass-table-head text-left">
-                      {cols.map((c) => (
-                        <th key={c} className="px-3 py-2 text-white/60 font-medium whitespace-nowrap">{c}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {rows.slice(0, 100).map((r, i) => (
-                      <tr key={i} className="glass-row border-t border-white/5">
-                        {cols.map((c) => (
-                          <td key={c} className="px-3 py-1.5 text-white/80 whitespace-nowrap max-w-[280px] overflow-hidden text-ellipsis">
-                            {String(r[c])}
-                          </td>
-                        ))}
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              )}
-              {rows.length > 100 && (
-                <p className="text-xs text-white/40 py-2 px-3">{t('sites.sql.moreRows', '仅显示前 100 行')} · {result.count} {t('sites.sql.rows', '行数')}</p>
-              )}
-            </div>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
 
 // ---------- 主组件 ----------
 const Sites = () => {
   const { t } = useI18n();
-  const [tab, setTab] = useState('nginx');
-
+  
   return (
     <div className="space-y-6">
       <div>
@@ -626,27 +580,10 @@ const Sites = () => {
           <FileWarning size={24} className="text-white/60" />
           {t('sites.title', '站点管理')}
         </h1>
-        <p className="text-white/50">{t('sites.subtitle', 'Nginx 站点 · SQLite 数据库管理')}</p>
+        <p className="text-white/50">{t('sites.subtitle', 'Nginx 站点管理')}</p>
       </div>
 
-      {/* Tab 切换 */}
-      <div className="flex gap-2">
-        {[['nginx', 'Nginx', Server], ['sql', 'SQLite', Database]].map(([key, label, Icon]) => (
-          <button
-            key={key}
-            onClick={() => setTab(key)}
-            className={cn('px-5 py-2.5 rounded-xl text-sm font-medium flex items-center gap-2 transition-all border',
-              tab === key
-                ? 'bg-gradient-to-br from-violet-500/25 to-indigo-500/15 border-violet-500/40 text-white shadow-[0_0_20px_rgba(139,92,246,0.15)]'
-                : 'border-white/10 text-white/50 hover:text-white/80 hover:border-white/25')}
-          >
-            <Icon size={15} />
-            {label}
-          </button>
-        ))}
-      </div>
-
-      {tab === 'nginx' ? <NginxTab /> : <SqlTab />}
+      <NginxTab />
     </div>
   );
 };

@@ -1,7 +1,9 @@
 package service
 
 import (
+	"crypto/rand"
 	"database/sql"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -9,6 +11,17 @@ import (
 
 	_ "modernc.org/sqlite"
 )
+
+// generateRandomPassword 生成随机密码
+func generateRandomPassword(length int) string {
+	const chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*"
+	b := make([]byte, length)
+	_, _ = rand.Read(b)
+	for i := range b {
+		b[i] = chars[int(b[i])%len(chars)]
+	}
+	return string(b)
+}
 
 // ============ Nginx ============
 
@@ -233,6 +246,10 @@ func NginxDeleteSite(name string) error {
 		_ = os.Remove(enabled)
 	}
 
+	// 清理该站点关联的附加数据库
+	path := filepath.Join("/var/lib/sqlite", strings.TrimSuffix(name, ".conf")+".db")
+	SqlDeleteDB(path)
+
 	return NginxReload()
 }
 
@@ -273,9 +290,122 @@ type SqlTable struct {
 }
 
 type SqlDB struct {
-	Path string `json:"path"`
-	Size int64  `json:"size"`
-	Tables []SqlTable `json:"tables"`
+	Path    string     `json:"path"`
+	Size    int64      `json:"size"`
+	Tables  []SqlTable `json:"tables"`
+	CreatedAt string   `json:"created_at"`
+}
+
+type CreateDBRequest struct {
+	Name     string `json:"name"`
+	Password string `json:"password"`
+}
+
+type CreateDBResponse struct {
+	Path     string `json:"path"`
+	Password string `json:"password"`
+}
+
+// SqlCreateDB 创建新的 SQLite 数据库（PHP 站点附加 DB）
+// 若 password 为空则自动生成 16 位随机密码
+func SqlCreateDB(req CreateDBRequest) (CreateDBResponse, error) {
+	if req.Name == "" {
+		return CreateDBResponse{}, fmt.Errorf("database name required")
+	}
+
+	saveDir := "/var/lib/sqlite"
+	if _, err := os.Stat("/var/lib/sqlite"); err != nil {
+		if _, err := os.Stat("/data"); err == nil {
+			saveDir = "/data/sqlite"
+		}
+	}
+
+	if _, err := os.Stat(saveDir); err != nil {
+		if err := os.MkdirAll(saveDir, 0755); err != nil {
+			return CreateDBResponse{}, fmt.Errorf("failed to create db directory: %w", err)
+		}
+	}
+
+	dbPath := filepath.Join(saveDir, filepath.Base(req.Name))
+	if !strings.HasSuffix(dbPath, ".db") {
+		dbPath += ".db"
+	}
+
+	if _, err := os.Stat(dbPath); err == nil {
+		return CreateDBResponse{}, fmt.Errorf("database %s already exists", req.Name)
+	}
+
+	passwd := req.Password
+	if passwd == "" {
+		passwd = generateRandomPassword(16)
+	}
+
+	createSQL := `
+CREATE TABLE users (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    username TEXT NOT NULL UNIQUE,
+    password TEXT NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE sites (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL UNIQUE,
+    url TEXT NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE config (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    key TEXT NOT NULL UNIQUE,
+    value TEXT
+);
+`
+	db, err := sql.Open("sqlite", filepath.ToSlash(dbPath))
+	if err != nil {
+		return CreateDBResponse{}, err
+	}
+	if _, err := db.Exec(createSQL); err != nil {
+		db.Close()
+		os.Remove(dbPath)
+		return CreateDBResponse{}, err
+	}
+	if _, err := db.Exec(`INSERT INTO users (username, password) VALUES (?, ?)`, "admin", passwd); err != nil {
+		db.Close()
+		os.Remove(dbPath)
+		return CreateDBResponse{}, err
+	}
+	db.Close()
+
+	if err := os.Chmod(dbPath, 0600); err != nil {
+		return CreateDBResponse{}, fmt.Errorf("failed to set permissions: %w", err)
+	}
+
+	// 记录创建时间与密码（写入 manifest 文件，方便前端读取）
+	manifest := dbPath + ".manifest"
+	manifestData := fmt.Sprintf("path=%s\npassword=%s\ncreated=%s\n", dbPath, passwd, "now")
+	if err := os.WriteFile(manifest, []byte(manifestData), 0600); err != nil {
+		return CreateDBResponse{}, fmt.Errorf("failed to write db manifest: %w", err)
+	}
+
+	return CreateDBResponse{
+		Path:     dbPath,
+		Password: passwd,
+	}, nil
+}
+
+// SqlDeleteDB 删除附加数据库（配合站点删除）
+func SqlDeleteDB(dbPath string) error {
+	if dbPath == "" {
+		return nil
+	}
+	if _, err := os.Stat(dbPath); os.IsNotExist(err) {
+		return nil
+	}
+	if err := os.Remove(dbPath); err != nil {
+		return err
+	}
+	manifest := dbPath + ".manifest"
+	os.Remove(manifest)
+	return nil
 }
 
 func SqlListDBs() []SqlDB {

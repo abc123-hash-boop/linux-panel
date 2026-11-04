@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Globe, RefreshCw, Power, Loader2 } from 'lucide-react';
+import { Globe, RefreshCw, Power, Loader2, Plus, X, LayoutList, Monitor } from 'lucide-react';
 import { useI18n } from '../i18n';
 
 const BrowserView = () => {
@@ -8,6 +8,9 @@ const BrowserView = () => {
   const pcRef = useRef(null);
   const inputWsRef = useRef(null);
   const sessionRef = useRef(null);
+  const tabsRef = useRef([]); // 该 session 的所有 tab
+  const activeTabIdRef = useRef(null); // 当前激活的 tab
+
   // 帧重组状态：screencast 帧以 "frame-start" 元数据 + 分块二进制 发送
   const frameRef = useRef({ expected: 0, chunks: [], received: 0 });
   // 视口尺寸（Chrome 真实分辨率）与画面尺寸（WebRTC 视频分辨率），用于坐标换算
@@ -19,11 +22,17 @@ const BrowserView = () => {
   const [url, setUrl] = useState('');
   const [currentUrl, setCurrentUrl] = useState('');
   const [fps, setFps] = useState(0);
+  const [showTabs, setShowTabs] = useState(false);
   // true = 焦点在地址栏（键盘给地址栏）；false = 焦点在画面（键盘转发到 Chrome）
   const [urlFocused, setUrlFocused] = useState(true);
-  // 持久化状态
-  const [persistUrl, setPersistUrl] = useState('');
   const [hasHistory, setHasHistory] = useState(false);
+
+  // tab 列表状态（与 refs 同步）
+  const [tabList, setTabList] = useState([]);
+  const [activeTabId, setActiveTabId] = useState(null);
+
+  // 同步 refs
+  useEffect(() => { tabsRef.current = tabList; activeTabIdRef.current = activeTabId; }, [tabList, activeTabId]);
 
   useEffect(() => {
     const stored = localStorage.getItem('browser_history');
@@ -32,7 +41,7 @@ const BrowserView = () => {
         const history = JSON.parse(stored);
         const current = history.find(u => u.id === sessionId);
         if (current) {
-          setPersistUrl(current.url);
+          setUrl(current.url);
           setHasHistory(true);
         }
       } catch {}
@@ -47,10 +56,8 @@ const BrowserView = () => {
     } catch {}
     history = history.filter(u => u.id !== sessionId);
     history.push({ id: sessionId, url: newUrl, visitedAt: Date.now() });
-    // 只保留最近 20 条
     if (history.length > 20) history = history.slice(-20);
     localStorage.setItem('browser_history', JSON.stringify(history));
-    setPersistUrl(newUrl);
     setHasHistory(true);
   }, [sessionId]);
 
@@ -60,7 +67,6 @@ const BrowserView = () => {
       try {
         const history = JSON.parse(stored).filter(u => u.id !== sessionId);
         localStorage.setItem('browser_history', JSON.stringify(history));
-        setPersistUrl('');
         setHasHistory(false);
       } catch {}
     }
@@ -81,15 +87,7 @@ const BrowserView = () => {
     return false;
   }, [sessionId]);
 
-  // 页面初始化时尝试恢复上次访问的 URL
-  useEffect(() => {
-    if (persistUrl && status === 'streaming' && currentUrl === 'about:blank') {
-      setUrl(persistUrl);
-    }
-  }, [status, persistUrl, currentUrl]);
-
   /* ---------------- 画面渲染 ---------------- */
-
   const drawFrame = useCallback((bytes) => {
     const blob = new Blob([bytes], { type: 'image/jpeg' });
     const objUrl = URL.createObjectURL(blob);
@@ -112,33 +110,20 @@ const BrowserView = () => {
   }, []);
 
   /* ---------------- WHIP 串流 ---------------- */
-
   const startStream = useCallback(async (sid) => {
-    const pc = new RTCPeerConnection({
-      iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
-    });
+    const pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
     pcRef.current = pc;
-
     const dc = pc.createDataChannel('screencast');
     dc.binaryType = 'arraybuffer';
-
     let frameCount = 0;
-    const fpsTimer = setInterval(() => {
-      setFps(frameCount);
-      frameCount = 0;
-    }, 1000);
-
+    const fpsTimer = setInterval(() => { setFps(frameCount); frameCount = 0; }, 1000);
     dc.onmessage = (ev) => {
       const st = frameRef.current;
       if (typeof ev.data === 'string') {
         try {
           const meta = JSON.parse(ev.data);
-          if (meta.type === 'frame-start') {
-            st.expected = meta.size;
-            st.chunks = [];
-            st.received = 0;
-          }
-        } catch { /* 忽略非 JSON 文本 */ }
+          if (meta.type === 'frame-start') { st.expected = meta.size; st.chunks = []; st.received = 0; }
+        } catch {}
         return;
       }
       if (st.expected <= 0) return;
@@ -153,51 +138,35 @@ const BrowserView = () => {
           off += take;
           if (off >= st.expected) break;
         }
-        st.expected = 0;
-        st.chunks = [];
-        st.received = 0;
-        frameCount++;
-        drawFrame(frame);
+        st.expected = 0; st.chunks = []; st.received = 0;
+        frameCount++; drawFrame(frame);
       }
     };
-
     pc.onconnectionstatechange = () => {
       const s = pc.connectionState;
       if (s === 'connected') setStatus('streaming');
       else if (s === 'failed' || s === 'closed') setStatus('disconnected');
     };
-
     const offer = await pc.createOffer();
     await pc.setLocalDescription(offer);
-
-    // 非 trickle ICE：等收集完成后一次性发 offer
     await new Promise((resolve) => {
       if (pc.iceGatheringState === 'complete') return resolve();
       const check = () => {
         if (pc.iceGatheringState === 'complete') {
-          pc.removeEventListener('icegatheringstatechange', check);
-          resolve();
+          pc.removeEventListener('icegatheringstatechange', check); resolve();
         }
       };
       pc.addEventListener('icegatheringstatechange', check);
       setTimeout(resolve, 8000);
     });
-
-    const resp = await fetch(`/browser/sessions/${sid}/whip`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/sdp' },
-      body: pc.localDescription.sdp,
-      credentials: 'include',
-    });
+    const resp = await fetch(`/browser/sessions/${sid}/whip`, { method: 'POST', headers: { 'Content-Type': 'application/sdp' }, body: pc.localDescription.sdp, credentials: 'include' });
     if (!resp.ok) throw new Error(`WHIP 失败: HTTP ${resp.status}`);
     const answer = await resp.text();
     await pc.setRemoteDescription({ type: 'answer', sdp: answer });
-
     return () => clearInterval(fpsTimer);
   }, [drawFrame]);
 
   /* ---------------- 输入通道 ---------------- */
-
   const startInput = useCallback((sid) => {
     const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const ws = new WebSocket(`${proto}//${window.location.host}/browser/sessions/${sid}/ws`);
@@ -209,23 +178,17 @@ const BrowserView = () => {
     if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg));
   }, []);
 
-  // 画面坐标 → Chrome 视口坐标
   const toViewport = useCallback((clientX, clientY) => {
     const canvas = canvasRef.current;
     const g = geomRef.current;
     if (!canvas || !g.frameW || !g.frameH) return null;
     const rect = canvas.getBoundingClientRect();
-    // 1) 浏览器显示尺寸 → 画面像素；2) 画面像素 → Chrome 视口
     const px = ((clientX - rect.left) / rect.width) * g.frameW;
     const py = ((clientY - rect.top) / rect.height) * g.frameH;
-    return {
-      x: Math.round((px / g.frameW) * g.viewW),
-      y: Math.round((py / g.frameH) * g.viewH),
-    };
+    return { x: Math.round((px / g.frameW) * g.viewW), y: Math.round((py / g.frameH) * g.viewH) };
   }, []);
 
   /* ---------------- Session 生命周期 ---------------- */
-
   useEffect(() => {
     let disposed = false;
     let stopFps = null;
@@ -238,42 +201,51 @@ const BrowserView = () => {
           throw new Error(e.error || `创建会话失败: HTTP ${resp.status}`);
         }
         const sess = await resp.json();
-        if (disposed) {
-          fetch(`/browser/sessions/${sess.id}`, { method: 'DELETE', credentials: 'include' });
-          return;
-        }
+        if (disposed) { fetch(`/browser/sessions/${sess.id}`, { method: 'DELETE', credentials: 'include' }); return; }
         sessionRef.current = sess.id;
         setSessionId(sess.id);
         geomRef.current.viewW = sess.view_w || 1920;
         geomRef.current.viewH = sess.view_h || 1080;
         setCurrentUrl(sess.url || 'about:blank');
+        setUrl(sess.url || 'about:blank');
         setStatus('connecting');
+
+        // 刷新 tab 列表
+        refreshTabs(sess.id);
 
         startInput(sess.id);
         stopFps = await startStream(sess.id);
       } catch (e) {
-        if (!disposed) {
-          setError(e.message);
-          setStatus('error');
-        }
+        if (!disposed) { setError(e.message); setStatus('error'); }
       }
     })();
 
-    return () => {
-      disposed = true;
-      if (stopFps) stopFps();
-      inputWsRef.current?.close();
-      pcRef.current?.close();
-      const sid = sessionRef.current;
-      if (sid) {
-        // 组件卸载时关闭 Chrome，避免残留进程
-        fetch(`/browser/sessions/${sid}`, { method: 'DELETE', keepalive: true, credentials: 'include' });
-      }
-    };
+    return () => { disposed = true; if (stopFps) stopFps(); inputWsRef.current?.close(); pcRef.current?.close(); };
   }, [startStream, startInput]);
 
-  /* ---------------- 地址栏同步（轮询当前 URL） ---------------- */
+  const refreshTabs = useCallback(async (sid) => {
+    try {
+      const resp = await fetch(`/browser/sessions/${sid}/tabs`, { credentials: 'include' });
+      if (!resp.ok) return;
+      const tabs = await resp.json();
+      if (!tabs || tabs.length === 0) return;
+      setTabList(tabs);
+      if (!activeTabId) {
+        // 默认激活第一个（主）tab
+        const main = tabs.find(t => t.IsActive) || tabs[0];
+        setActiveTabId(main.ID);
+      }
+    } catch (e) { console.error('refresh tabs err:', e); }
+  }, [activeTabId]);
 
+  useEffect(() => {
+    if (!sessionId || status !== 'streaming') return;
+    refreshTabs(sessionId);
+    const timer = setInterval(() => refreshTabs(sessionId), 5000);
+    return () => clearInterval(timer);
+  }, [sessionId, status, refreshTabs]);
+
+  /* ---------------- URL 轮询 ---------------- */
   useEffect(() => {
     if (!sessionId || status !== 'streaming') return;
     const poll = async () => {
@@ -281,9 +253,15 @@ const BrowserView = () => {
         const resp = await fetch(`/browser/sessions/${sessionId}/info`, { credentials: 'include' });
         if (!resp.ok) return;
         const info = await resp.json();
-        if (info.url && info.url !== currentUrl) {
-          setCurrentUrl(info.url);
-          if (!urlFocused) setUrl(info.url);
+        const tab = tabList.find(t => t.ID === activeTabId);
+        if (info.url && info.url !== (tab?.url || currentUrl)) {
+          if (tab) {
+            setTabList(prev => prev.map(t => t.ID === tab.ID ? { ...t, url: info.url, title: info.url } : t));
+          }
+          if (activeTabIdRef.current === activeTabId) {
+            setCurrentUrl(info.url);
+            if (!urlFocused) setUrl(info.url);
+          }
         }
         if (info.view_w || info.view_h) {
           geomRef.current.viewW = info.view_w || geomRef.current.viewW;
@@ -292,53 +270,79 @@ const BrowserView = () => {
       } catch {}
     };
     const timer = setInterval(poll, 2000);
-    poll(); // 立即同步一次
+    poll();
     return () => clearInterval(timer);
-  }, [sessionId, status, currentUrl, urlFocused]);
+  }, [sessionId, status, activeTabId, tabList, urlFocused, currentUrl]);
 
   /* ---------------- 键盘转发 ---------------- */
-
   useEffect(() => {
     if (urlFocused) return;
-    const onKeyDown = (e) => {
-      e.preventDefault();
-      sendInput({ type: 'keydown', key: e.key, code: e.code });
-    };
-    const onKeyUp = (e) => {
-      e.preventDefault();
-      sendInput({ type: 'keyup', key: e.key, code: e.code });
-    };
+    const onKeyDown = (e) => { e.preventDefault(); sendInput({ type: 'keydown', key: e.key, code: e.code }); };
+    const onKeyUp = (e) => { e.preventDefault(); sendInput({ type: 'keyup', key: e.key, code: e.code }); };
     document.addEventListener('keydown', onKeyDown);
     document.addEventListener('keyup', onKeyUp);
-    return () => {
-      document.removeEventListener('keydown', onKeyDown);
-      document.removeEventListener('keyup', onKeyUp);
-    };
+    return () => { document.removeEventListener('keydown', onKeyDown); document.removeEventListener('keyup', onKeyUp); };
   }, [urlFocused, sendInput]);
 
   /* ---------------- 交互处理 ---------------- */
-
   const handleMouseDown = (e) => {
-    e.preventDefault();
-    setUrlFocused(false);
+    e.preventDefault(); setUrlFocused(false);
     const p = toViewport(e.clientX, e.clientY);
     if (p) sendInput({ type: 'mousedown', x: p.x, y: p.y });
   };
-
   const handleMouseUp = (e) => {
     const p = toViewport(e.clientX, e.clientY);
     if (p) sendInput({ type: 'mouseup', x: p.x, y: p.y });
   };
-
   const handleMouseMove = (e) => {
     const p = toViewport(e.clientX, e.clientY);
     if (p) sendInput({ type: 'mousemove', x: p.x, y: p.y });
   };
-
   const handleWheel = (e) => {
     e.preventDefault();
     const p = toViewport(e.clientX, e.clientY);
     if (p) sendInput({ type: 'wheel', x: p.x, y: p.y, delta: Math.round(e.deltaY) });
+  };
+
+  const createTab = async () => {
+    if (!sessionId) return;
+    try {
+      const resp = await fetch(`/browser/sessions/${sessionId}/tabs`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: 'about:blank' }), credentials: 'include' });
+      if (!resp.ok) throw new Error('创建 tab 失败');
+      const tab = await resp.json();
+      refreshTabs(sessionId);
+      setActiveTabId(tab.ID);
+    } catch (e) { setError(e.message); }
+  };
+
+  const closeTab = async (tabId) => {
+    if (tabId === activeTabId) {
+      // 关闭当前 tab 时切换到另一个
+      const remaining = tabList.filter(t => t.ID !== tabId);
+      if (remaining.length > 0) {
+        await switchTab(remaining[0].ID);
+      }
+    }
+    try {
+      await fetch(`/browser/sessions/${sessionId}/tabs/${tabId}`, { method: 'DELETE', credentials: 'include' });
+      refreshTabs(sessionId);
+    } catch (e) { console.error('close tab err:', e); }
+  };
+
+  const switchTab = async (tabId) => {
+    if (!sessionId || tabId === activeTabId) return;
+    try {
+      const resp = await fetch(`/browser/sessions/${sessionId}/tabs/${tabId}/activate`, {
+        method: 'POST', credentials: 'include' });
+      if (!resp.ok) throw new Error('切换 tab 失败');
+      setActiveTabId(tabId);
+      setUrlFocused(false);
+      // 刷新该 tab 的 URL 显示
+      const tab = tabList.find(t => t.ID === tabId);
+      if (tab) setUrl(tab.url || 'about:blank');
+    } catch (e) { setError(e.message); }
   };
 
   const navigate = async () => {
@@ -347,11 +351,8 @@ const BrowserView = () => {
     if (!/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(target)) target = 'https://' + target;
     try {
       const resp = await fetch(`/browser/sessions/${sessionId}/navigate`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url: target }),
-        credentials: 'include',
-      });
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: target, tabId: activeTabId }), credentials: 'include' });
       if (!resp.ok) {
         const e = await resp.json().catch(() => ({}));
         throw new Error(e.error || `导航失败: HTTP ${resp.status}`);
@@ -362,9 +363,9 @@ const BrowserView = () => {
       savePersistedUrl(info.url);
       setError('');
       setUrlFocused(false);
-    } catch (e) {
-      setError(e.message);
-    }
+      // 更新 tab 列表
+      refreshTabs(sessionId);
+    } catch (e) { setError(e.message); }
   };
 
   const reload = () => {
@@ -372,11 +373,8 @@ const BrowserView = () => {
       setUrl(currentUrl);
       savePersistedUrl(currentUrl);
       fetch(`/browser/sessions/${sessionId}/navigate`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url: currentUrl }),
-        credentials: 'include',
-      });
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: currentUrl, tabId: activeTabId }), credentials: 'include' });
     }
   };
 
@@ -392,15 +390,44 @@ const BrowserView = () => {
 
   return (
     <div className="flex flex-col h-[calc(100vh-80px)] gap-4">
+      {/* Tab 栏 */}
+      <div className="flex items-center gap-2 overflow-x-auto">
+        <button
+          onClick={createTab}
+          className="flex items-center gap-1 px-3 py-1.5 bg-gradient-to-br from-violet-500/25 to-indigo-500/15 border border-violet-500/40 rounded-lg text-sm text-white hover:bg-violet-500/35 transition-colors whitespace-nowrap"
+        >
+          <Plus size={14} />
+          <span>{t('browser.addTab', '新建标签页')}</span>
+        </button>
+        {tabList.map(tab => (
+          <div
+            key={tab.ID}
+            onClick={() => switchTab(tab.ID)}
+            className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm cursor-pointer transition-all whitespace-nowrap select-none
+              ${activeTabId === tab.ID
+                ? 'bg-gradient-to-br from-violet-500/25 to-indigo-500/15 border border-violet-500/40 text-white shadow'
+                : 'bg-white/5 border border-white/10 text-white/60 hover:bg-white/10'}`}
+          >
+            <Globe size={12} className="shrink-0" />
+            <span className="truncate max-w-[180px]">{tab.title || tab.url || '空白页'}</span>
+            {tabList.length > 1 && (
+              <button
+                onClick={(e) => { e.stopPropagation(); closeTab(tab.ID); }}
+                className="p-0.5 hover:bg-white/20 rounded"
+              >
+                <X size={12} />
+              </button>
+            )}
+          </div>
+        ))}
+      </div>
+
       {/* 地址栏 */}
       <div className="flex flex-col gap-2 glass-strong rounded-2xl border border-white/10">
         <div className="flex gap-2 items-center">
           {hasHistory && (
-            <button
-              onClick={restoreHistory}
-              title={t('browser.restoringHint', '恢复上次访问的页面')}
-              className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
-            >
+            <button onClick={restoreHistory} title={t('browser.restoringHint', '恢复上次访问的页面')}
+              className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors">
               <RefreshCw size={16} className="animate-pulse" />
             </button>
           )}
@@ -421,9 +448,7 @@ const BrowserView = () => {
         {hasHistory && (
           <div className="text-xs text-white/50 flex items-center gap-2">
             <span>{t('browser.historyHint', '📌 已保存上次访问地址，点击刷新图标可恢复')}</span>
-            <button onClick={clearHistory} className="hover:text-red-500 underline">
-              {t('browser.clearHistory', '清除记录')}
-            </button>
+            <button onClick={clearHistory} className="hover:text-red-500 underline">{t('browser.clearHistory', '清除记录')}</button>
           </div>
         )}
       </div>
@@ -439,9 +464,7 @@ const BrowserView = () => {
           </div>
         )}
         {error && (
-          <div className="absolute top-4 left-4 right-4 bg-red-500 text-white px-4 py-2 rounded-lg text-sm z-20">
-            {error}
-          </div>
+          <div className="absolute top-4 left-4 right-4 bg-red-500 text-white px-4 py-2 rounded-lg text-sm z-20">{error}</div>
         )}
         <canvas
           ref={canvasRef}

@@ -114,7 +114,7 @@ func main() {
 		)
 		protected.POST(
 			"/sites/nginx/site/create",
-			panelApi.NginxCreateSite,
+			panelApi.CreateSite,
 		)
 		protected.POST(
 			"/sites/nginx/site/:name/:action",
@@ -139,10 +139,6 @@ func main() {
 		protected.POST(
 			"/sites/sql/delete",
 			panelApi.SqlDeleteDB,
-		)
-		protected.POST(
-			"/sites/nginx/site/create",
-			panelApi.CreateSite,
 		)
 
 		/*

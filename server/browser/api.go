@@ -30,6 +30,11 @@ func RegisterRoutes(r *gin.Engine, manager *SessionManager, authMW ...gin.Handle
 		browser.GET("/sessions/:id/info", cdpInfoHandler(manager))
 		browser.GET("/sessions/:id/cdp", cdpProxyWSHandler(manager))
 		browser.GET("/sessions/:id/ws", inputWSHandler(manager))
+		// tab 相关 API（多 tab 支持）
+		browser.GET("/sessions/:id/tabs", listTabsHandler(manager))
+		browser.POST("/sessions/:id/tabs", createTabHandler(manager))
+		browser.DELETE("/sessions/:id/tabs/:tabId", closeTabHandler(manager))
+		browser.POST("/sessions/:id/tabs/:tabId/activate", activateTabHandler(manager))
 		browser.GET("/sessions/:id/tools/screenshot", browserScreenshotHandler(manager))
 		browser.POST("/sessions/:id/tools/navigate", browserNavigateToolHandler(manager))
 		browser.POST("/sessions/:id/tools/click", browserClickToolHandler(manager))
@@ -85,11 +90,22 @@ func navigateHandler(m *SessionManager) gin.HandlerFunc {
 			return
 		}
 		var req struct {
-			URL string `json:"url" binding:"required"`
+			URL   string `json:"url" binding:"required"`
+			TabID string `json:"tabId"`
 		}
 		if err := c.ShouldBindJSON(&req); err != nil {
 			c.JSON(400, gin.H{"error": "url required"})
 			return
+		}
+		tabID := c.Query("tabId")
+		if tabID == "" {
+			tabID = req.TabID
+		}
+		if tabID != "" {
+			if err := s.SwitchTab(tabID); err != nil {
+				c.JSON(404, gin.H{"error": err.Error()})
+				return
+			}
 		}
 		if err := s.Navigate(req.URL); err != nil {
 			c.JSON(500, gin.H{"error": err.Error()})
@@ -137,6 +153,80 @@ func cdpInfoHandler(m *SessionManager) gin.HandlerFunc {
 			"view_w":        info.ViewW,
 			"view_h":        info.ViewH,
 		})
+	}
+}
+
+// listTabsHandler 列出 session 的所有 tab
+func listTabsHandler(m *SessionManager) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		s, ok := m.GetSession(c.Param("id"))
+		if !ok {
+			c.JSON(404, gin.H{"error": "session not found"})
+			return
+		}
+		c.JSON(200, s.ListTabs())
+	}
+}
+
+// createTabHandler 在当前 session 创建新 tab
+func createTabHandler(m *SessionManager) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		s, ok := m.GetSession(c.Param("id"))
+		if !ok {
+			c.JSON(404, gin.H{"error": "session not found"})
+			return
+		}
+		var req struct {
+			URL string `json:"url"`
+		}
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(400, gin.H{"error": "url optional"})
+			return
+		}
+		if req.URL == "" {
+			req.URL = "about:blank"
+		}
+		tab, err := s.CreateTab(req.URL)
+		if err != nil {
+			c.JSON(500, gin.H{"error": err.Error()})
+			return
+		}
+		_ = s.SwitchTab(tab.TargetID)
+		c.JSON(200, tab.TabInfo())
+	}
+}
+
+// closeTabHandler 关闭指定 tab
+func closeTabHandler(m *SessionManager) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		s, ok := m.GetSession(c.Param("id"))
+		if !ok {
+			c.JSON(404, gin.H{"error": "session not found"})
+			return
+		}
+		tabID := c.Param("tabId")
+		if err := s.CloseTab(tabID); err != nil {
+			c.JSON(404, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(200, gin.H{"success": true, "tab_id": tabID})
+	}
+}
+
+// activateTabHandler 激活指定 tab
+func activateTabHandler(m *SessionManager) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		s, ok := m.GetSession(c.Param("id"))
+		if !ok {
+			c.JSON(404, gin.H{"error": "session not found"})
+			return
+		}
+		tabID := c.Param("tabId")
+		if err := s.SwitchTab(tabID); err != nil {
+			c.JSON(404, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(200, s.Info())
 	}
 }
 

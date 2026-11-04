@@ -26,12 +26,16 @@ type SessionManager struct {
 	mu       sync.RWMutex
 	sessions map[string]*Session
 	nextID   atomic.Int64
-	dataDir  string // 持久化数据目录
+	dataDir  string // 持久化数据目录（相对 server 根目录）
+	// 共享 user-data-dir：所有 session 共用同一份浏览器配置、Cookie、LocalStorage
+	sharedDataDir     string
+	sharedProfileBase string
 }
 
 var DefaultManager = &SessionManager{
-	sessions: make(map[string]*Session),
-	dataDir:  "./browser/persist", // 持久化数据目录（相对 server 根目录）
+	sessions:      make(map[string]*Session),
+	dataDir:       "./browser/persist", // 持久化数据目录（相对 server 根目录）
+	sharedDataDir: "/tmp/linux-panel-browser/shared-user-data",
 }
 
 // BrowserInputMsg 输入消息结构（由前端 WebSocket 发送）
@@ -67,6 +71,22 @@ type SessionState struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
+// Tab 会话内的一个 tab（page target）
+type Tab struct {
+	ID       string `json:"id"`
+	Title    string `json:"title"`
+	URL      string `json:"url"`
+	TargetID string `json:"target_id"`
+	// 是否为主 tab（主 tab 是当前激活的 tab，所有导航/截图操作默认作用于主 tab）
+	IsActive bool `json:"is_active"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+// TabInfo 返回 tab 的公开信息
+func (t *Tab) TabInfo() Tab {
+	return *t
+}
+
 // loadSessionState 加载会话状态
 func loadSessionState(dataDir, id string) (*SessionState, error) {
 	f := filepath.Join(dataDir, id+".json")
@@ -97,16 +117,19 @@ func saveSessionState(dataDir, id string, state *SessionState) error {
 }
 
 // CreateSession 启动一个新的 Headless Chrome 实例
+// 所有 session 共享同一份 user-data-dir（同一份 Cookie/LocalStorage/历史）
+// 每个 session 在共享 profile 下使用独立的 --profile-directory 子目录（避免多进程冲突）
+// profile 目录命名：shared-user-data/Profile1 / Profile2 / ...
 func (m *SessionManager) CreateSession() (*Session, error) {
 	id := uuid.New().String()
-	idx := m.nextID.Add(1)
-	profileDir := filepath.Join("/tmp", "linux-panel-browser", fmt.Sprintf("%s-%d", id, idx))
+	profileIdx := m.nextID.Add(1)
+	sharedProfileDir := filepath.Join(m.sharedDataDir, fmt.Sprintf("Profile%d", profileIdx))
 
-	if err := os.MkdirAll(profileDir, 0755); err != nil {
-		return nil, fmt.Errorf("create profile dir: %w", err)
+	if err := os.MkdirAll(sharedProfileDir, 0755); err != nil {
+		return nil, fmt.Errorf("create shared profile dir: %w", err)
 	}
 
-	s := NewSession(id, profileDir)
+	s := NewSession(id, sharedProfileDir)
 	m.mu.Lock()
 	m.sessions[id] = s
 	m.mu.Unlock()
@@ -145,32 +168,21 @@ func (m *SessionManager) ListSessions() []Info {
 	return infos
 }
 
-// CleanupOldSessions 清理上次运行残留的 Chrome 进程和 profile 目录
-// 在 Panel 启动时调用，避免 SIGKILL 等异常退出留下孤儿进程
+// CleanupOldSessions 清理上次运行残留的 Chrome 进程和共享 profile 目录
 func (m *SessionManager) CleanupOldSessions() {
-	root := filepath.Join("/tmp", "linux-panel-browser")
-
-	// 先杀掉 user-data-dir 指向我们 profile 根目录的 Chrome 进程
-	killOrphanChrome(root)
-
-	entries, err := os.ReadDir(root)
-	if err != nil {
-		return
-	}
-	for _, entry := range entries {
-		if entry.IsDir() {
-			_ = os.RemoveAll(filepath.Join(root, entry.Name()))
-		}
+	killOrphanChrome(m.sharedDataDir)
+	if err := os.RemoveAll(m.sharedDataDir); err != nil {
+		fmt.Printf("[Browser] cleanup shared data err: %v\n", err)
 	}
 }
 
-// killOrphanChrome 杀死 user-data-dir 位于 root 下的残留 Chrome 进程
-func killOrphanChrome(root string) {
+// killOrphanChrome 杀死 user-data-dir 位于 sharedDataDir 下的残留 Chrome 进程
+func killOrphanChrome(sharedDataDir string) {
 	procs, err := os.ReadDir("/proc")
 	if err != nil {
 		return
 	}
-	needle := "--user-data-dir=" + root
+	needle := "--user-data-dir=" + sharedDataDir
 	for _, p := range procs {
 		if !p.IsDir() {
 			continue
@@ -183,7 +195,6 @@ func killOrphanChrome(root string) {
 		if err != nil {
 			continue
 		}
-		// cmdline 以 NUL 分隔
 		args := strings.ReplaceAll(string(cmdline), "\x00", " ")
 		if strings.Contains(args, needle) {
 			if proc, err := os.FindProcess(pid); err == nil {
@@ -231,7 +242,7 @@ func (m *SessionManager) Shutdown() {
 // Session
 // ============================================================
 
-// Session 代表一个独立的 Headless Chrome 实例
+// Session 代表一个独立的 Headless Chrome 实例（内含多个 tab）
 type Session struct {
 	ID         string
 	CreatedAt  time.Time
@@ -242,10 +253,11 @@ type Session struct {
 	ViewW      int
 	ViewH      int
 
+	tabs    map[string]*Tab       // 所有 tab，key 为 targetId
 	cmd     *exec.Cmd
 	cancel  context.CancelFunc
 	closed  bool
-	mu      sync.Mutex
+	mu      sync.RWMutex
 	cached  cacheEntry // 5 秒内的 DOM/text 缓存，避免重复连接 Chrome
 }
 
@@ -291,11 +303,24 @@ func pidOf(cmd *exec.Cmd) int {
 
 // NewSession 构造函数
 func NewSession(id, profileDir string) *Session {
-	return &Session{
+	s := &Session{
 		ID:         id,
 		CreatedAt:  time.Now(),
 		ProfileDir: profileDir,
+		tabs:       make(map[string]*Tab),
 	}
+	// 初始化主 tab（after:blank）
+	s.mu.Lock()
+	mainTab := &Tab{
+		ID:       id + "-main",
+		Title:    "空白页",
+		URL:      "about:blank",
+		IsActive: true,
+		CreatedAt: time.Now(),
+	}
+	s.tabs[mainTab.ID] = mainTab
+	s.mu.Unlock()
+	return s
 }
 
 // restoreState 恢复会话状态（持久化的 URL、viewport）
@@ -450,16 +475,228 @@ func (s *Session) pageWSURL() (string, error) {
 	return "", fmt.Errorf("no page target")
 }
 
+// pageTargets 列出所有 page target（用于多 tab 管理）
+func (s *Session) pageTargets() ([]struct {
+	TargetID string `json:"targetId"`
+	Type     string `json:"type"`
+	Title    string `json:"title"`
+	URL      string `json:"url"`
+}, error) {
+	client := &http.Client{Timeout: 3 * time.Second}
+	resp, err := client.Get(fmt.Sprintf("http://127.0.0.1:%d/json/list", s.Port))
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	var targets []struct {
+		TargetID string `json:"targetId"`
+		Type     string `json:"type"`
+		Title    string `json:"title"`
+		URL      string `json:"url"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&targets); err != nil {
+		return nil, err
+	}
+	var result []struct {
+		TargetID string `json:"targetId"`
+		Type     string `json:"type"`
+		Title    string `json:"title"`
+		URL      string `json:"url"`
+	}
+	for _, t := range targets {
+		if t.Type == "page" {
+			result = append(result, t)
+		}
+	}
+	return result, nil
+}
+
+// cdpWSForTab 获取指定 tab 的 CDP ws URL
+func (s *Session) cdpWSForTab(tab *Tab) (string, error) {
+	if tab == nil {
+		return "", fmt.Errorf("no active tab")
+	}
+	client := &http.Client{Timeout: 3 * time.Second}
+	resp, err := client.Get(fmt.Sprintf("http://127.0.0.1:%d/json", s.Port))
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	var targets []struct {
+		TargetID             string `json:"targetId"`
+		WebSocketDebuggerURL string `json:"webSocketDebuggerUrl"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&targets); err != nil {
+		return "", err
+	}
+	for _, t := range targets {
+		if t.TargetID == tab.TargetID {
+			return t.WebSocketDebuggerURL, nil
+		}
+	}
+	for _, t := range targets {
+		if t.WebSocketDebuggerURL != "" {
+			return t.WebSocketDebuggerURL, nil
+		}
+	}
+	return "", fmt.Errorf("no cdp ws url for tab %s", tab.ID)
+}
+
+// CreateTab 在当前 session 创建一个新 tab
+func (s *Session) CreateTab(url string) (*Tab, error) {
+	s.mu.Lock()
+	closed := s.closed
+	s.mu.Unlock()
+	if closed {
+		return nil, fmt.Errorf("session is closed")
+	}
+
+	// 通过浏览器级 CDP 创建新 page
+	httpClient := &http.Client{Timeout: 15 * time.Second}
+	createURL := fmt.Sprintf("http://127.0.0.1:%d/json/new?%s", s.Port, "url="+url)
+	req, err := http.NewRequest("GET", createURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	location := resp.Header.Get("Location")
+	wsURL := ""
+	if location != "" {
+		// 返回格式：ws://127.0.0.1:xxxxx/devtools/page/xxxxx
+		_, rest, ok := strings.Cut(location, "devtools/page/")
+		if ok {
+			wsURL = rest
+		}
+	}
+	if wsURL == "" {
+		return nil, fmt.Errorf("failed to create tab: no target id in location: %s", location)
+	}
+	targetID := wsURL
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	// 更新已有 tab 的活跃状态
+	for _, tab := range s.tabs {
+		tab.IsActive = false
+	}
+
+	tab := &Tab{
+		ID:       targetID,
+		Title:    "空白页",
+		URL:      url,
+		TargetID: targetID,
+		IsActive: true,
+		CreatedAt: time.Now(),
+	}
+	s.tabs[targetID] = tab
+	s.CurrentURL = url
+
+	return tab, nil
+}
+
+// SwitchTab 切换到指定 tab
+func (s *Session) SwitchTab(targetID string) error {
+	s.mu.Lock()
+	tab, ok := s.tabs[targetID]
+	if !ok {
+		s.mu.Unlock()
+		return fmt.Errorf("tab not found: %s", targetID)
+	}
+	// 更新已有 tab 的活跃状态
+	for _, t := range s.tabs {
+		t.IsActive = false
+	}
+	tab.IsActive = true
+	s.CurrentURL = tab.URL
+	s.mu.Unlock()
+
+	// 激活该 tab
+	httpClient := &http.Client{Timeout: 15 * time.Second}
+	activateURL := fmt.Sprintf("http://127.0.0.1:%d/json/activate/%s", s.Port, targetID)
+	req, err := http.NewRequest("GET", activateURL, nil)
+	if err != nil {
+		return err
+	}
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return err
+	}
+	_ = resp.Body.Close()
+	return nil
+}
+
+// CloseTab 关闭指定 tab
+func (s *Session) CloseTab(targetID string) error {
+	s.mu.Lock()
+	tab, ok := s.tabs[targetID]
+	if !ok {
+		s.mu.Unlock()
+		return fmt.Errorf("tab not found: %s", targetID)
+	}
+	// 如果是主 tab，不能直接删，保留主 tab
+	delete(s.tabs, targetID)
+	// 重新激活一个 tab
+	for _, t := range s.tabs {
+		if t != tab {
+			t.IsActive = true
+			s.CurrentURL = t.URL
+			break
+		}
+	}
+	s.mu.Unlock()
+
+	// 通过 CDP 关闭目标
+	httpClient := &http.Client{Timeout: 15 * time.Second}
+	closeURL := fmt.Sprintf("http://127.0.0.1:%d/json/close/%s", s.Port, targetID)
+	req, err := http.NewRequest("GET", closeURL, nil)
+	if err != nil {
+		return err
+	}
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return err
+	}
+	_ = resp.Body.Close()
+	return nil
+}
+
+// ListTabs 列出当前 session 的所有 tab
+func (s *Session) ListTabs() []*Tab {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	result := make([]*Tab, 0, len(s.tabs))
+	for _, tab := range s.tabs {
+		// 刷新每个 tab 的标题和 URL
+		result = append(result, tab)
+	}
+	return result
+}
+
+// MainTab 获取当前活跃 tab（主 tab）
+func (s *Session) MainTab() *Tab {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for _, tab := range s.tabs {
+		if tab.IsActive {
+			return tab
+		}
+	}
+	return nil
+}
+
 // getDOM 获取页面 DOM（5 秒内返回缓存，避免重复连接 Chrome）
 func (s *Session) getDOM() (string, error) {
-	s.mu.Lock()
-	entry := s.cached
-	s.mu.Unlock()
-	if entry.html != "" && !entry.isExpired() {
-		return entry.html, nil
+	tab := s.MainTab()
+	if tab == nil {
+		return "", fmt.Errorf("no active tab")
 	}
-	// 缓存未命中，连接 Chrome 获取
-	wsURL, err := s.pageWSURL()
+	wsURL, err := s.cdpWSForTab(tab)
 	if err != nil {
 		return "", err
 	}
@@ -496,13 +733,11 @@ func (s *Session) getDOM() (string, error) {
 
 // getText 获取页面可见文本（5 秒内返回缓存）
 func (s *Session) getText() (string, error) {
-	s.mu.Lock()
-	entry := s.cached
-	s.mu.Unlock()
-	if entry.text != "" && !entry.isExpired() {
-		return entry.text, nil
+	tab := s.MainTab()
+	if tab == nil {
+		return "", fmt.Errorf("no active tab")
 	}
-	wsURL, err := s.pageWSURL()
+	wsURL, err := s.cdpWSForTab(tab)
 	if err != nil {
 		return "", err
 	}
@@ -532,9 +767,13 @@ func (s *Session) getText() (string, error) {
 	return res.Result.Value, nil
 }
 
-// Navigate 导航到指定 URL
+// Navigate 导航到指定 URL（作用于当前活跃 tab）
 func (s *Session) Navigate(targetURL string) error {
-	wsURL, err := s.pageWSURL()
+	tab := s.MainTab()
+	if tab == nil {
+		return fmt.Errorf("no active tab")
+	}
+	wsURL, err := s.cdpWSForTab(tab)
 	if err != nil {
 		return err
 	}
@@ -550,6 +789,9 @@ func (s *Session) Navigate(targetURL string) error {
 	}
 	s.mu.Lock()
 	s.CurrentURL = targetURL
+	if tab != nil {
+		tab.URL = targetURL
+	}
 	s.mu.Unlock()
 	// 导航后注入元素 ID，方便 AI 通过 @a/@b 等点击
 	time.Sleep(500 * time.Millisecond)
@@ -563,7 +805,11 @@ func (s *Session) Navigate(targetURL string) error {
 
 // injectElementIds 为页面上所有可交互元素分配唯一 ID（@a, @b, @c...）
 func (s *Session) injectElementIds() error {
-	wsURL, err := s.pageWSURL()
+	tab := s.MainTab()
+	if tab == nil {
+		return fmt.Errorf("no active tab")
+	}
+	wsURL, err := s.cdpWSForTab(tab)
 	if err != nil {
 		return err
 	}
@@ -597,9 +843,13 @@ func (s *Session) injectElementIds() error {
 	return nil
 }
 
-// Screenshot 返回当前页面 JPEG 截图
+// Screenshot 返回当前页面（主 tab）JPEG 截图
 func (s *Session) Screenshot() ([]byte, error) {
-	wsURL, err := s.pageWSURL()
+	tab := s.MainTab()
+	if tab == nil {
+		return nil, fmt.Errorf("no active tab")
+	}
+	wsURL, err := s.cdpWSForTab(tab)
 	if err != nil {
 		return nil, err
 	}
@@ -621,9 +871,13 @@ func (s *Session) Screenshot() ([]byte, error) {
 	return base64.StdEncoding.DecodeString(res.Data)
 }
 
-// InputEvent 处理输入事件
+// InputEvent 处理输入事件（作用于当前活跃 tab）
 func (s *Session) InputEvent(msg BrowserInputMsg) error {
-	wsURL, err := s.pageWSURL()
+	tab := s.MainTab()
+	if tab == nil {
+		return fmt.Errorf("no active tab")
+	}
+	wsURL, err := s.cdpWSForTab(tab)
 	if err != nil {
 		return err
 	}

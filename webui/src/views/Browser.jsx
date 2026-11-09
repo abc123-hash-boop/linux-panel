@@ -310,7 +310,10 @@ const BrowserView = () => {
       const resp = await fetch(`/browser/sessions/${sessionId}/tabs`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ url: 'about:blank' }), credentials: 'include' });
-      if (!resp.ok) throw new Error('创建 tab 失败');
+      if (!resp.ok) {
+        const detail = await resp.json().catch(() => ({}));
+        throw new Error(detail.error || `创建 tab 失败: HTTP ${resp.status}`);
+      }
       const tab = await resp.json();
       refreshTabs(sessionId);
       setActiveTabId(tab.ID);

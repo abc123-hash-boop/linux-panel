@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -51,15 +52,15 @@ type BrowserInputMsg struct {
 
 // Info 对外暴露的 Session 信息
 type Info struct {
-	ID         string `json:"id"`
-	Status     string `json:"status"`
-	URL        string `json:"url"`
-	CDPURL     string `json:"cdp_url"`
-	CDPWSURL   string `json:"cdp_ws_url"`
-	StreamURL  string `json:"stream_url"`
-	ChromePID  int    `json:"chrome_pid"`
-	ViewW      int    `json:"view_w"`
-	ViewH      int    `json:"view_h"`
+	ID        string `json:"id"`
+	Status    string `json:"status"`
+	URL       string `json:"url"`
+	CDPURL    string `json:"cdp_url"`
+	CDPWSURL  string `json:"cdp_ws_url"`
+	StreamURL string `json:"stream_url"`
+	ChromePID int    `json:"chrome_pid"`
+	ViewW     int    `json:"view_w"`
+	ViewH     int    `json:"view_h"`
 }
 
 // SessionState 会话状态（持久化）
@@ -78,7 +79,7 @@ type Tab struct {
 	URL      string `json:"url"`
 	TargetID string `json:"target_id"`
 	// 是否为主 tab（主 tab 是当前激活的 tab，所有导航/截图操作默认作用于主 tab）
-	IsActive bool `json:"is_active"`
+	IsActive  bool      `json:"is_active"`
 	CreatedAt time.Time `json:"created_at"`
 }
 
@@ -253,12 +254,12 @@ type Session struct {
 	ViewW      int
 	ViewH      int
 
-	tabs    map[string]*Tab       // 所有 tab，key 为 targetId
-	cmd     *exec.Cmd
-	cancel  context.CancelFunc
-	closed  bool
-	mu      sync.RWMutex
-	cached  cacheEntry // 5 秒内的 DOM/text 缓存，避免重复连接 Chrome
+	tabs   map[string]*Tab // 所有 tab，key 为 targetId
+	cmd    *exec.Cmd
+	cancel context.CancelFunc
+	closed bool
+	mu     sync.RWMutex
+	cached cacheEntry // 5 秒内的 DOM/text 缓存，避免重复连接 Chrome
 }
 
 // cacheEntry 缓存条目
@@ -312,10 +313,10 @@ func NewSession(id, profileDir string) *Session {
 	// 初始化主 tab（after:blank）
 	s.mu.Lock()
 	mainTab := &Tab{
-		ID:       id + "-main",
-		Title:    "空白页",
-		URL:      "about:blank",
-		IsActive: true,
+		ID:        id + "-main",
+		Title:     "空白页",
+		URL:       "about:blank",
+		IsActive:  true,
 		CreatedAt: time.Now(),
 	}
 	s.tabs[mainTab.ID] = mainTab
@@ -543,60 +544,81 @@ func (s *Session) cdpWSForTab(tab *Tab) (string, error) {
 }
 
 // CreateTab 在当前 session 创建一个新 tab
-func (s *Session) CreateTab(url string) (*Tab, error) {
-	s.mu.Lock()
+func (s *Session) CreateTab(targetURL string) (*Tab, error) {
+	s.mu.RLock()
 	closed := s.closed
-	s.mu.Unlock()
+	port := s.Port
+	s.mu.RUnlock()
 	if closed {
 		return nil, fmt.Errorf("session is closed")
 	}
-
-	// 通过浏览器级 CDP 创建新 page
-	httpClient := &http.Client{Timeout: 15 * time.Second}
-	createURL := fmt.Sprintf("http://127.0.0.1:%d/json/new?%s", s.Port, "url="+url)
-	req, err := http.NewRequest("GET", createURL, nil)
-	if err != nil {
-		return nil, err
+	if port <= 0 {
+		return nil, fmt.Errorf("chrome debugging endpoint is not ready")
 	}
+	if targetURL == "" {
+		targetURL = "about:blank"
+	}
+
+	// Chrome 136+ requires PUT for /json/new. The endpoint returns a JSON
+	// TargetInfo object; older code incorrectly used GET and expected a
+	// Location header, which caused tab creation to fail on current Chrome.
+	createURL := fmt.Sprintf("http://127.0.0.1:%d/json/new?%s", port, url.QueryEscape(targetURL))
+	req, err := http.NewRequest(http.MethodPut, createURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("build create-tab request: %w", err)
+	}
+	httpClient := &http.Client{Timeout: 15 * time.Second}
 	resp, err := httpClient.Do(req)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("create tab request: %w", err)
 	}
 	defer resp.Body.Close()
 
-	location := resp.Header.Get("Location")
-	wsURL := ""
-	if location != "" {
-		// 返回格式：ws://127.0.0.1:xxxxx/devtools/page/xxxxx
-		_, rest, ok := strings.Cut(location, "devtools/page/")
-		if ok {
-			wsURL = rest
-		}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		return nil, fmt.Errorf("chrome create tab returned HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
 	}
-	if wsURL == "" {
-		return nil, fmt.Errorf("failed to create tab: no target id in location: %s", location)
+
+	var target struct {
+		ID    string `json:"id"`
+		Title string `json:"title"`
+		URL   string `json:"url"`
+		Type  string `json:"type"`
 	}
-	targetID := wsURL
+	if err := json.NewDecoder(resp.Body).Decode(&target); err != nil {
+		return nil, fmt.Errorf("decode chrome create-tab response: %w", err)
+	}
+	if target.ID == "" {
+		return nil, fmt.Errorf("chrome create-tab response did not contain target id")
+	}
+	if target.Type != "" && target.Type != "page" {
+		return nil, fmt.Errorf("chrome created unexpected target type %q", target.Type)
+	}
+	if target.URL == "" {
+		target.URL = targetURL
+	}
+	if target.Title == "" {
+		target.Title = "空白页"
+	}
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
-
-	// 更新已有 tab 的活跃状态
+	if s.closed {
+		return nil, fmt.Errorf("session was closed while creating tab")
+	}
 	for _, tab := range s.tabs {
 		tab.IsActive = false
 	}
-
 	tab := &Tab{
-		ID:       targetID,
-		Title:    "空白页",
-		URL:      url,
-		TargetID: targetID,
-		IsActive: true,
+		ID:        target.ID,
+		Title:     target.Title,
+		URL:       target.URL,
+		TargetID:  target.ID,
+		IsActive:  true,
 		CreatedAt: time.Now(),
 	}
-	s.tabs[targetID] = tab
-	s.CurrentURL = url
-
+	s.tabs[target.ID] = tab
+	s.CurrentURL = target.URL
 	return tab, nil
 }
 
@@ -711,7 +733,7 @@ func (s *Session) getDOM() (string, error) {
 		} `json:"result"`
 	}
 	if err := conn.Call("Runtime.evaluate", map[string]interface{}{
-		"expression":  "document.documentElement.outerHTML",
+		"expression":    "document.documentElement.outerHTML",
 		"returnByValue": true,
 	}, &res, 8*time.Second); err != nil {
 		return "", err
@@ -752,7 +774,7 @@ func (s *Session) getText() (string, error) {
 		} `json:"result"`
 	}
 	if err := conn.Call("Runtime.evaluate", map[string]interface{}{
-		"expression":  "document.body.innerText",
+		"expression":    "document.body.innerText",
 		"returnByValue": true,
 	}, &res, 8*time.Second); err != nil {
 		return "", err
@@ -835,7 +857,7 @@ func (s *Session) injectElementIds() error {
 		})()
 	`
 	if err := conn.Call("Runtime.evaluate", map[string]interface{}{
-		"expression": expr,
+		"expression":    expr,
 		"returnByValue": true,
 	}, &res, 5*time.Second); err != nil {
 		return err
@@ -1053,7 +1075,7 @@ func (s *Session) Viewport() (int, int, error) {
 	}
 	expr := `({w: window.innerWidth, h: window.innerHeight})`
 	if err := conn.Call("Runtime.evaluate", map[string]interface{}{
-		"expression": expr,
+		"expression":    expr,
 		"returnByValue": true,
 	}, &res, 5*time.Second); err != nil {
 		return 0, 0, err

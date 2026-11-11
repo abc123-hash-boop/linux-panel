@@ -254,12 +254,13 @@ type Session struct {
 	ViewW      int
 	ViewH      int
 
-	tabs   map[string]*Tab // 所有 tab，key 为 targetId
-	cmd    *exec.Cmd
-	cancel context.CancelFunc
-	closed bool
-	mu     sync.RWMutex
-	cached cacheEntry // 5 秒内的 DOM/text 缓存，避免重复连接 Chrome
+	tabs       map[string]*Tab // 所有 tab，key 为 targetId
+	cmd        *exec.Cmd
+	cancel     context.CancelFunc
+	closed     bool
+	mu         sync.RWMutex
+	cached     cacheEntry // 5 秒内的 DOM/text 缓存，避免重复连接 Chrome
+	streamConn *cdpConn   // 当前 WebRTC 串流使用的 CDP 连接；切换 tab 时只重连 CDP，不重建 WebRTC
 }
 
 // cacheEntry 缓存条目
@@ -453,27 +454,14 @@ func (s *Session) IsClosed() bool {
 	return s.closed
 }
 
-// pageWSURL 查询第一个 page 目标的 CDP ws URL
+// pageWSURL 返回当前活跃标签页的 CDP WebSocket，而不是固定取第一个 page target。
+// 否则多标签切换后，WebRTC 串流仍会显示第一个标签页。
 func (s *Session) pageWSURL() (string, error) {
-	client := &http.Client{Timeout: 3 * time.Second}
-	resp, err := client.Get(fmt.Sprintf("http://127.0.0.1:%d/json", s.Port))
-	if err != nil {
-		return "", err
+	tab := s.MainTab()
+	if tab == nil {
+		return "", fmt.Errorf("no active tab")
 	}
-	defer resp.Body.Close()
-	var targets []struct {
-		Type                 string `json:"type"`
-		WebSocketDebuggerURL string `json:"webSocketDebuggerUrl"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&targets); err != nil {
-		return "", err
-	}
-	for _, t := range targets {
-		if t.Type == "page" && t.WebSocketDebuggerURL != "" {
-			return t.WebSocketDebuggerURL, nil
-		}
-	}
-	return "", fmt.Errorf("no page target")
+	return s.cdpWSForTab(tab)
 }
 
 // pageTargets 列出所有 page target（用于多 tab 管理）
@@ -518,29 +506,30 @@ func (s *Session) cdpWSForTab(tab *Tab) (string, error) {
 		return "", fmt.Errorf("no active tab")
 	}
 	client := &http.Client{Timeout: 3 * time.Second}
-	resp, err := client.Get(fmt.Sprintf("http://127.0.0.1:%d/json", s.Port))
+	resp, err := client.Get(fmt.Sprintf("http://127.0.0.1:%d/json/list", s.Port))
 	if err != nil {
 		return "", err
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("chrome target list returned HTTP %d", resp.StatusCode)
+	}
 	var targets []struct {
-		TargetID             string `json:"targetId"`
+		ID                   string `json:"id"`
 		WebSocketDebuggerURL string `json:"webSocketDebuggerUrl"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&targets); err != nil {
 		return "", err
 	}
 	for _, t := range targets {
-		if t.TargetID == tab.TargetID {
+		if t.ID == tab.TargetID {
+			if t.WebSocketDebuggerURL == "" {
+				return "", fmt.Errorf("chrome target %s has no debugger websocket URL", tab.TargetID)
+			}
 			return t.WebSocketDebuggerURL, nil
 		}
 	}
-	for _, t := range targets {
-		if t.WebSocketDebuggerURL != "" {
-			return t.WebSocketDebuggerURL, nil
-		}
-	}
-	return "", fmt.Errorf("no cdp ws url for tab %s", tab.ID)
+	return "", fmt.Errorf("no cdp ws url for active tab %s (target %s)", tab.ID, tab.TargetID)
 }
 
 // CreateTab 在当前 session 创建一个新 tab
@@ -650,7 +639,34 @@ func (s *Session) SwitchTab(targetID string) error {
 		return err
 	}
 	_ = resp.Body.Close()
+	s.interruptStream()
 	return nil
+}
+
+// interruptStream 关闭当前标签页的 CDP 连接，促使串流 worker 捕获新的活跃标签页。
+// WebRTC PeerConnection 和 DataChannel 保持不变，因此切换标签页无需重新 ICE 握手。
+func (s *Session) interruptStream() {
+	s.mu.Lock()
+	conn := s.streamConn
+	s.streamConn = nil
+	s.mu.Unlock()
+	if conn != nil {
+		_ = conn.Close()
+	}
+}
+
+func (s *Session) setStreamConn(conn *cdpConn) {
+	s.mu.Lock()
+	s.streamConn = conn
+	s.mu.Unlock()
+}
+
+func (s *Session) clearStreamConn(conn *cdpConn) {
+	s.mu.Lock()
+	if s.streamConn == conn {
+		s.streamConn = nil
+	}
+	s.mu.Unlock()
 }
 
 // CloseTab 关闭指定 tab

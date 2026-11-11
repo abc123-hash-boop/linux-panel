@@ -191,6 +191,8 @@ func streamScreencastToDataChannel(sess *Session, dc *webrtc.DataChannel) {
 			continue
 		}
 
+		sess.setStreamConn(conn)
+
 		// Enable Page domain
 		conn.Call("Page.enable", nil, nil, 2*time.Second)
 		// Bring to front
@@ -283,11 +285,13 @@ func streamScreencastToDataChannel(sess *Session, dc *webrtc.DataChannel) {
 				// 忽略其他 CDP 事件（导航等）
 			}
 		}
+		sess.clearStreamConn(conn)
 		_ = conn.Close()
-		if done || sess.IsClosed() {
+		if sess.IsClosed() || dc.ReadyState() != webrtc.DataChannelStateOpen {
 			break
 		}
-		time.Sleep(100 * time.Millisecond)
+		// 当前 DataChannel 仍有效时，才允许在 CDP 断开后重连新的 active target。
+		time.Sleep(30 * time.Millisecond)
 	}
 	log.Printf("[WHIP] screencast stream ended, total frames=%d", frameCount)
 }

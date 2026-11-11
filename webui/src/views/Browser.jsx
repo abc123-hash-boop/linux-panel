@@ -10,6 +10,7 @@ const BrowserView = () => {
   const sessionRef = useRef(null);
   const tabsRef = useRef([]); // 该 session 的所有 tab
   const activeTabIdRef = useRef(null); // 当前激活的 tab
+  const stopStreamRef = useRef(null);
 
   // 帧重组状态：screencast 帧以 "frame-start" 元数据 + 分块二进制 发送
   const frameRef = useRef({ expected: 0, chunks: [], received: 0 });
@@ -111,6 +112,8 @@ const BrowserView = () => {
 
   /* ---------------- WHIP 串流 ---------------- */
   const startStream = useCallback(async (sid) => {
+    stopStreamRef.current?.();
+    pcRef.current?.close();
     const pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
     pcRef.current = pc;
     const dc = pc.createDataChannel('screencast');
@@ -142,6 +145,7 @@ const BrowserView = () => {
         frameCount++; drawFrame(frame);
       }
     };
+    stopStreamRef.current = () => clearInterval(fpsTimer);
     pc.onconnectionstatechange = () => {
       const s = pc.connectionState;
       if (s === 'connected') setStatus('streaming');
@@ -163,7 +167,7 @@ const BrowserView = () => {
     if (!resp.ok) throw new Error(`WHIP 失败: HTTP ${resp.status}`);
     const answer = await resp.text();
     await pc.setRemoteDescription({ type: 'answer', sdp: answer });
-    return () => clearInterval(fpsTimer);
+    return () => { clearInterval(fpsTimer); if (pcRef.current === pc) pcRef.current = null; };
   }, [drawFrame]);
 
   /* ---------------- 输入通道 ---------------- */
@@ -220,7 +224,7 @@ const BrowserView = () => {
       }
     })();
 
-    return () => { disposed = true; if (stopFps) stopFps(); inputWsRef.current?.close(); pcRef.current?.close(); };
+    return () => { disposed = true; if (stopFps) stopFps(); stopStreamRef.current?.(); inputWsRef.current?.close(); pcRef.current?.close(); };
   }, [startStream, startInput]);
 
   const refreshTabs = useCallback(async (sid) => {
@@ -232,8 +236,8 @@ const BrowserView = () => {
       setTabList(tabs);
       if (!activeTabId) {
         // 默认激活第一个（主）tab
-        const main = tabs.find(t => t.IsActive) || tabs[0];
-        setActiveTabId(main.ID);
+        const main = tabs.find(t => t.is_active) || tabs[0];
+        setActiveTabId(main.id);
       }
     } catch (e) { console.error('refresh tabs err:', e); }
   }, [activeTabId]);
@@ -253,10 +257,10 @@ const BrowserView = () => {
         const resp = await fetch(`/browser/sessions/${sessionId}/info`, { credentials: 'include' });
         if (!resp.ok) return;
         const info = await resp.json();
-        const tab = tabList.find(t => t.ID === activeTabId);
+        const tab = tabList.find(t => t.id === activeTabId);
         if (info.url && info.url !== (tab?.url || currentUrl)) {
           if (tab) {
-            setTabList(prev => prev.map(t => t.ID === tab.ID ? { ...t, url: info.url, title: info.url } : t));
+            setTabList(prev => prev.map(t => t.id === tab.id ? { ...t, url: info.url, title: info.url } : t));
           }
           if (activeTabIdRef.current === activeTabId) {
             setCurrentUrl(info.url);
@@ -315,17 +319,18 @@ const BrowserView = () => {
         throw new Error(detail.error || `创建 tab 失败: HTTP ${resp.status}`);
       }
       const tab = await resp.json();
-      refreshTabs(sessionId);
-      setActiveTabId(tab.ID);
+      setActiveTabId(tab.id);
+      await refreshTabs(sessionId);
+      await startStream(sessionId);
     } catch (e) { setError(e.message); }
   };
 
   const closeTab = async (tabId) => {
     if (tabId === activeTabId) {
       // 关闭当前 tab 时切换到另一个
-      const remaining = tabList.filter(t => t.ID !== tabId);
+      const remaining = tabList.filter(t => t.id !== tabId);
       if (remaining.length > 0) {
-        await switchTab(remaining[0].ID);
+        await switchTab(remaining[0].id);
       }
     }
     try {
@@ -342,8 +347,11 @@ const BrowserView = () => {
       if (!resp.ok) throw new Error('切换 tab 失败');
       setActiveTabId(tabId);
       setUrlFocused(false);
+      // 重新建立串流，确保新的 WHIP worker 绑定到刚激活的 Chrome target。
+      // 之前仅更新 UI 状态并尝试复用旧 DataChannel，实际画面可能仍停留在旧页面。
+      await startStream(sessionId);
       // 刷新该 tab 的 URL 显示
-      const tab = tabList.find(t => t.ID === tabId);
+      const tab = tabList.find(t => t.id === tabId);
       if (tab) setUrl(tab.url || 'about:blank');
     } catch (e) { setError(e.message); }
   };
@@ -404,10 +412,10 @@ const BrowserView = () => {
         </button>
         {tabList.map(tab => (
           <div
-            key={tab.ID}
-            onClick={() => switchTab(tab.ID)}
+            key={tab.id}
+            onClick={() => switchTab(tab.id)}
             className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm cursor-pointer transition-all whitespace-nowrap select-none
-              ${activeTabId === tab.ID
+              ${activeTabId === tab.id
                 ? 'bg-gradient-to-br from-violet-500/25 to-indigo-500/15 border border-violet-500/40 text-white shadow'
                 : 'bg-white/5 border border-white/10 text-white/60 hover:bg-white/10'}`}
           >
@@ -415,7 +423,7 @@ const BrowserView = () => {
             <span className="truncate max-w-[180px]">{tab.title || tab.url || '空白页'}</span>
             {tabList.length > 1 && (
               <button
-                onClick={(e) => { e.stopPropagation(); closeTab(tab.ID); }}
+                onClick={(e) => { e.stopPropagation(); closeTab(tab.id); }}
                 className="p-0.5 hover:bg-white/20 rounded"
               >
                 <X size={12} />

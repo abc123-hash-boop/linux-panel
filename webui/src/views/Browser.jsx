@@ -245,7 +245,7 @@ const BrowserView = () => {
   useEffect(() => {
     if (!sessionId || status !== 'streaming') return;
     refreshTabs(sessionId);
-    const timer = setInterval(() => refreshTabs(sessionId), 5000);
+    const timer = setInterval(() => refreshTabs(sessionId), 1000);
     return () => clearInterval(timer);
   }, [sessionId, status, refreshTabs]);
 
@@ -273,7 +273,7 @@ const BrowserView = () => {
         }
       } catch {}
     };
-    const timer = setInterval(poll, 2000);
+    const timer = setInterval(poll, 700);
     poll();
     return () => clearInterval(timer);
   }, [sessionId, status, activeTabId, tabList, urlFocused, currentUrl]);
@@ -281,8 +281,9 @@ const BrowserView = () => {
   /* ---------------- 键盘转发 ---------------- */
   useEffect(() => {
     if (urlFocused) return;
-    const onKeyDown = (e) => { e.preventDefault(); sendInput({ type: 'keydown', key: e.key, code: e.code }); };
-    const onKeyUp = (e) => { e.preventDefault(); sendInput({ type: 'keyup', key: e.key, code: e.code }); };
+    const modifiers = (e) => (e.altKey ? 1 : 0) | (e.ctrlKey ? 2 : 0) | (e.metaKey ? 4 : 0) | (e.shiftKey ? 8 : 0);
+    const onKeyDown = (e) => { e.preventDefault(); sendInput({ type: 'keydown', key: e.key, code: e.code, modifiers: modifiers(e) }); };
+    const onKeyUp = (e) => { e.preventDefault(); sendInput({ type: 'keyup', key: e.key, code: e.code, modifiers: modifiers(e) }); };
     document.addEventListener('keydown', onKeyDown);
     document.addEventListener('keyup', onKeyUp);
     return () => { document.removeEventListener('keydown', onKeyDown); document.removeEventListener('keyup', onKeyUp); };

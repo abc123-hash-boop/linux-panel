@@ -138,20 +138,21 @@ func cdpInfoHandler(m *SessionManager) gin.HandlerFunc {
 			c.JSON(404, gin.H{"error": "session not found"})
 			return
 		}
+		_ = s.refreshTabsFromChrome()
 		info := s.Info()
 		host := c.Request.Host
 		c.JSON(200, gin.H{
-			"id":            info.ID,
-			"status":        info.Status,
-			"url":           info.URL,
-			"cdp_http_url":  info.CDPURL,
-			"cdp_ws_url":    info.CDPWSURL,
-			"input_ws_url":  fmt.Sprintf("ws://%s/browser/sessions/%s/ws", host, c.Param("id")),
-			"whip_url":      fmt.Sprintf("http://%s/browser/sessions/%s/whip", host, c.Param("id")),
-			"snapshot_url":  fmt.Sprintf("http://%s/browser/sessions/%s/snapshot", host, c.Param("id")),
-			"chrome_pid":    info.ChromePID,
-			"view_w":        info.ViewW,
-			"view_h":        info.ViewH,
+			"id":           info.ID,
+			"status":       info.Status,
+			"url":          info.URL,
+			"cdp_http_url": info.CDPURL,
+			"cdp_ws_url":   info.CDPWSURL,
+			"input_ws_url": fmt.Sprintf("ws://%s/browser/sessions/%s/ws", host, c.Param("id")),
+			"whip_url":     fmt.Sprintf("http://%s/browser/sessions/%s/whip", host, c.Param("id")),
+			"snapshot_url": fmt.Sprintf("http://%s/browser/sessions/%s/snapshot", host, c.Param("id")),
+			"chrome_pid":   info.ChromePID,
+			"view_w":       info.ViewW,
+			"view_h":       info.ViewH,
 		})
 	}
 }
@@ -392,9 +393,9 @@ func browserClickToolHandler(m *SessionManager) gin.HandlerFunc {
 			return
 		}
 		var req struct {
-			X float64 `json:"x"`
-			Y float64 `json:"y"`
-			ID  string  `json:"id"` // 元素 ID，如 "@a"
+			X  float64 `json:"x"`
+			Y  float64 `json:"y"`
+			ID string  `json:"id"` // 元素 ID，如 "@a"
 		}
 		_ = c.ShouldBindJSON(&req)
 
@@ -417,7 +418,7 @@ func browserClickToolHandler(m *SessionManager) gin.HandlerFunc {
 			}
 			expr := fmt.Sprintf(`(function(){var el=document.getElementById(%q);if(el){el.click();return"clicked"}else{return"not_found"}})()`, req.ID)
 			if err := conn.Call("Runtime.evaluate", map[string]interface{}{
-				"expression":  expr,
+				"expression":    expr,
 				"returnByValue": true,
 			}, &res, 5*time.Second); err != nil {
 				c.JSON(500, gin.H{"error": err.Error()})
@@ -569,7 +570,9 @@ func browserScriptHandler(m *SessionManager) gin.HandlerFunc {
 						results = append(results, step)
 						continue
 					}
-					var res struct{ Result struct{ Value string } `json:"result"` }
+					var res struct {
+						Result struct{ Value string } `json:"result"`
+					}
 					expr := fmt.Sprintf(`(function(){var el=document.getElementById(%q);if(el){el.click();return"clicked"}else{return"not_found"}})()`, arg)
 					if err := conn.Call("Runtime.evaluate", map[string]interface{}{"expression": expr, "returnByValue": true}, &res, 5*time.Second); err != nil {
 						step["error"] = err.Error()
@@ -613,7 +616,9 @@ func browserScriptHandler(m *SessionManager) gin.HandlerFunc {
 						results = append(results, step)
 						continue
 					}
-					var res struct{ Result struct{ Value string } `json:"result"` }
+					var res struct {
+						Result struct{ Value string } `json:"result"`
+					}
 					expr := fmt.Sprintf(`(function(){var el=document.getElementById(%q);if(el){el.focus();el.select();return"focused"}else{return"not_found"}})()`, cmd.Args[1])
 					if err := conn.Call("Runtime.evaluate", map[string]interface{}{"expression": expr, "returnByValue": true}, &res, 5*time.Second); err != nil {
 						step["error"] = err.Error()

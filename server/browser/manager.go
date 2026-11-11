@@ -41,13 +41,14 @@ var DefaultManager = &SessionManager{
 
 // BrowserInputMsg 输入消息结构（由前端 WebSocket 发送）
 type BrowserInputMsg struct {
-	Type  string  `json:"type"`
-	URL   string  `json:"url,omitempty"`
-	X     float64 `json:"x"`
-	Y     float64 `json:"y"`
-	Key   string  `json:"key,omitempty"`
-	Code  string  `json:"code,omitempty"`
-	Delta int     `json:"delta,omitempty"`
+	Type      string  `json:"type"`
+	URL       string  `json:"url,omitempty"`
+	X         float64 `json:"x"`
+	Y         float64 `json:"y"`
+	Key       string  `json:"key,omitempty"`
+	Code      string  `json:"code,omitempty"`
+	Modifiers int     `json:"modifiers,omitempty"`
+	Delta     int     `json:"delta,omitempty"`
 }
 
 // Info 对外暴露的 Session 信息
@@ -140,6 +141,10 @@ func (m *SessionManager) CreateSession() (*Session, error) {
 		delete(m.sessions, id)
 		m.mu.Unlock()
 		return nil, err
+	}
+	// 将 NewSession 中的占位 tab 绑定到 Chrome 实际创建的 page target。
+	if err := s.refreshTabsFromChrome(); err != nil {
+		fmt.Printf("[Browser] initial tab sync failed: %v\n", err)
 	}
 
 	// 加载并恢复会话状态
@@ -466,7 +471,7 @@ func (s *Session) pageWSURL() (string, error) {
 
 // pageTargets 列出所有 page target（用于多 tab 管理）
 func (s *Session) pageTargets() ([]struct {
-	TargetID string `json:"targetId"`
+	TargetID string `json:"id"`
 	Type     string `json:"type"`
 	Title    string `json:"title"`
 	URL      string `json:"url"`
@@ -478,7 +483,7 @@ func (s *Session) pageTargets() ([]struct {
 	}
 	defer resp.Body.Close()
 	var targets []struct {
-		TargetID string `json:"targetId"`
+		TargetID string `json:"id"`
 		Type     string `json:"type"`
 		Title    string `json:"title"`
 		URL      string `json:"url"`
@@ -487,7 +492,7 @@ func (s *Session) pageTargets() ([]struct {
 		return nil, err
 	}
 	var result []struct {
-		TargetID string `json:"targetId"`
+		TargetID string `json:"id"`
 		Type     string `json:"type"`
 		Title    string `json:"title"`
 		URL      string `json:"url"`
@@ -498,6 +503,74 @@ func (s *Session) pageTargets() ([]struct {
 		}
 	}
 	return result, nil
+}
+
+// refreshTabsFromChrome 同步 Chrome 实际 page targets，修复启动时占位 tab 与真实 target ID 不一致的问题。
+func (s *Session) refreshTabsFromChrome() error {
+	client := &http.Client{Timeout: 3 * time.Second}
+	resp, err := client.Get(fmt.Sprintf("http://127.0.0.1:%d/json/list", s.Port))
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("chrome target list returned HTTP %d", resp.StatusCode)
+	}
+	var targets []struct {
+		ID    string `json:"id"`
+		Type  string `json:"type"`
+		Title string `json:"title"`
+		URL   string `json:"url"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&targets); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return fmt.Errorf("session is closed")
+	}
+	activeID := ""
+	for id, tab := range s.tabs {
+		if tab.IsActive {
+			activeID = id
+			break
+		}
+	}
+	seen := make(map[string]bool)
+	for _, target := range targets {
+		if target.Type != "page" || target.ID == "" {
+			continue
+		}
+		seen[target.ID] = true
+		tab := s.tabs[target.ID]
+		if tab == nil {
+			tab = &Tab{ID: target.ID, TargetID: target.ID, CreatedAt: time.Now()}
+			s.tabs[target.ID] = tab
+		}
+		tab.Title, tab.URL = target.Title, target.URL
+		tab.IsActive = target.ID == activeID
+	}
+	for id := range s.tabs {
+		if !seen[id] {
+			delete(s.tabs, id)
+		}
+	}
+	if len(seen) > 0 {
+		if !seen[activeID] {
+			for id := range seen {
+				activeID = id
+				break
+			}
+		}
+		for id, tab := range s.tabs {
+			tab.IsActive = id == activeID
+		}
+		if tab := s.tabs[activeID]; tab != nil {
+			s.CurrentURL = tab.URL
+		}
+	}
+	return nil
 }
 
 // cdpWSForTab 获取指定 tab 的 CDP ws URL
@@ -706,6 +779,7 @@ func (s *Session) CloseTab(targetID string) error {
 
 // ListTabs 列出当前 session 的所有 tab
 func (s *Session) ListTabs() []*Tab {
+	_ = s.refreshTabsFromChrome()
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	result := make([]*Tab, 0, len(s.tabs))
@@ -958,18 +1032,19 @@ func (s *Session) InputEvent(msg BrowserInputMsg) error {
 		}, nil, 2*time.Second)
 	case "keydown":
 		params := buildKeyParams("rawKeyDown", msg.Key, msg.Code)
+		params["modifiers"] = msg.Modifiers
 		if err := conn.Call("Input.dispatchKeyEvent", params, nil, 2*time.Second); err != nil {
 			return err
 		}
-		if len(msg.Key) == 1 {
-			params["type"] = "char"
-			params["text"] = msg.Key
-			params["unmodifiedText"] = msg.Key
-			return conn.Call("Input.dispatchKeyEvent", params, nil, 2*time.Second)
+		// 仅对普通可打印字符发送 char 事件；组合键交由 rawKeyDown 处理。
+		if msg.Key != "" && len([]rune(msg.Key)) == 1 && msg.Modifiers&7 == 0 {
+			return conn.Call("Input.dispatchKeyEvent", map[string]interface{}{"type": "char", "text": msg.Key, "unmodifiedText": msg.Key, "key": msg.Key, "modifiers": msg.Modifiers}, nil, 2*time.Second)
 		}
 		return nil
 	case "keyup":
-		return conn.Call("Input.dispatchKeyEvent", buildKeyParams("keyUp", msg.Key, msg.Code), nil, 2*time.Second)
+		params := buildKeyParams("keyUp", msg.Key, msg.Code)
+		params["modifiers"] = msg.Modifiers
+		return conn.Call("Input.dispatchKeyEvent", params, nil, 2*time.Second)
 	}
 	return nil
 }
@@ -982,14 +1057,13 @@ func buildKeyParams(keyType, key, code string) map[string]interface{} {
 	if code != "" {
 		params["code"] = code
 	}
-	if len(key) == 1 {
-		params["text"] = key
-		params["unmodifiedText"] = key
-		params["windowsVirtualKeyCode"] = uint8(key[0])
-		params["nativeVirtualKeyCode"] = uint8(key[0])
-	} else {
-		params["windowsVirtualKeyCode"] = keyToVKCode(key)
-		params["nativeVirtualKeyCode"] = keyToVKCode(key)
+	vk := keyToVKCode(key)
+	if vk == 0 {
+		vk = codeToVKCode(code)
+	}
+	if vk != 0 {
+		params["windowsVirtualKeyCode"] = vk
+		params["nativeVirtualKeyCode"] = vk
 	}
 	return params
 }
@@ -1149,4 +1223,41 @@ func parsePortFromURL(wsURL string) (int, error) {
 		return port, err
 	}
 	return 0, fmt.Errorf("cannot parse port from wsURL: %s", wsURL)
+}
+
+// codeToVKCode 将 KeyboardEvent.code 映射为 Windows 虚拟键码，避免用字符 UTF-8 字节推断键码。
+func codeToVKCode(code string) int {
+	switch {
+	case strings.HasPrefix(code, "Key") && len(code) == 4:
+		return int(code[3])
+	case strings.HasPrefix(code, "Digit") && len(code) == 6:
+		return int(code[5])
+	case strings.HasPrefix(code, "Numpad") && len(code) == 7:
+		return int(code[6])
+	case code == "Space":
+		return 0x20
+	case code == "Minus":
+		return 0xBD
+	case code == "Equal":
+		return 0xBB
+	case code == "BracketLeft":
+		return 0xDB
+	case code == "BracketRight":
+		return 0xDD
+	case code == "Backslash":
+		return 0xDC
+	case code == "Semicolon":
+		return 0xBA
+	case code == "Quote":
+		return 0xDE
+	case code == "Backquote":
+		return 0xC0
+	case code == "Comma":
+		return 0xBC
+	case code == "Period":
+		return 0xBE
+	case code == "Slash":
+		return 0xBF
+	}
+	return 0
 }

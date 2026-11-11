@@ -187,9 +187,19 @@ const BrowserView = () => {
     const g = geomRef.current;
     if (!canvas || !g.frameW || !g.frameH) return null;
     const rect = canvas.getBoundingClientRect();
-    const px = ((clientX - rect.left) / rect.width) * g.frameW;
-    const py = ((clientY - rect.top) / rect.height) * g.frameH;
-    return { x: Math.round((px / g.frameW) * g.viewW), y: Math.round((py / g.frameH) * g.viewH) };
+    if (rect.width <= 0 || rect.height <= 0 || g.viewW <= 0 || g.viewH <= 0) return null;
+
+    // 先将浏览器窗口的 CSS 坐标映射到实际显示帧，再映射到 Chrome CSS viewport。
+    // 使用 rect 而不是 canvas.width/height 作为显示区域，避免页面布局缩放造成偏移。
+    const displayX = clientX - rect.left;
+    const displayY = clientY - rect.top;
+    if (displayX < 0 || displayY < 0 || displayX > rect.width || displayY > rect.height) return null;
+    const frameX = (displayX / rect.width) * g.frameW;
+    const frameY = (displayY / rect.height) * g.frameH;
+    return {
+      x: Math.max(0, Math.min(g.viewW - 1, Math.round((frameX / g.frameW) * g.viewW))),
+      y: Math.max(0, Math.min(g.viewH - 1, Math.round((frameY / g.frameH) * g.viewH))),
+    };
   }, []);
 
   /* ---------------- Session 生命周期 ---------------- */

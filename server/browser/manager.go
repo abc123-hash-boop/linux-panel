@@ -142,9 +142,25 @@ func (m *SessionManager) CreateSession() (*Session, error) {
 		m.mu.Unlock()
 		return nil, err
 	}
-	// 将 NewSession 中的占位 tab 绑定到 Chrome 实际创建的 page target。
-	if err := s.refreshTabsFromChrome(); err != nil {
-		fmt.Printf("[Browser] initial tab sync failed: %v\n", err)
+	// Chrome 启动后 page target 的注册存在短暂延迟，重试同步并读取真实视口。
+	// 使用实际 CSS viewport，而不是假定 --window-size 就等于网页视口。
+	var viewportReady bool
+	for attempt := 0; attempt < 15; attempt++ {
+		if err := s.refreshTabsFromChrome(); err != nil {
+			fmt.Printf("[Browser] initial tab sync failed: %v\n", err)
+		}
+		if width, height, err := s.Viewport(); err == nil && width > 0 && height > 0 {
+			s.mu.Lock()
+			s.ViewW, s.ViewH = width, height
+			s.mu.Unlock()
+			fmt.Printf("[Browser] actual viewport: %dx%d\n", width, height)
+			viewportReady = true
+			break
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+	if !viewportReady {
+		fmt.Printf("[Browser] viewport detection failed; using fallback 1920x1080\n")
 	}
 
 	// 加载并恢复会话状态
@@ -364,6 +380,7 @@ func (s *Session) Start() error {
 		"--remote-allow-origins=*",
 		fmt.Sprintf("--user-data-dir=%s", s.ProfileDir),
 		"--window-size=1920,1080",
+		"--force-device-scale-factor=1",
 		"about:blank",
 	}
 

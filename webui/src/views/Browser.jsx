@@ -15,7 +15,7 @@ const BrowserView = () => {
   // 帧重组状态：screencast 帧以 "frame-start" 元数据 + 分块二进制 发送
   const frameRef = useRef({ expected: 0, chunks: [], received: 0 });
   // 视口尺寸（Chrome 真实分辨率）与画面尺寸（WebRTC 视频分辨率），用于坐标换算
-  const geomRef = useRef({ frameW: 0, frameH: 0, viewW: 1920, viewH: 1080 });
+  const geomRef = useRef({ frameW: 0, frameH: 0, viewW: 1920, viewH: 1080, streamW: 0, streamH: 0, offsetTop: 0 });
 
   const [sessionId, setSessionId] = useState('');
   const [status, setStatus] = useState('creating');
@@ -125,7 +125,7 @@ const BrowserView = () => {
       if (typeof ev.data === 'string') {
         try {
           const meta = JSON.parse(ev.data);
-          if (meta.type === 'frame-start') { st.expected = meta.size; st.chunks = []; st.received = 0; }
+          if (meta.type === 'frame-start') { st.expected = meta.size; st.chunks = []; st.received = 0; geomRef.current.streamW = meta.device_width || 0; geomRef.current.streamH = meta.device_height || 0; geomRef.current.offsetTop = meta.offset_top || 0; }
         } catch {}
         return;
       }
@@ -189,16 +189,25 @@ const BrowserView = () => {
     const rect = canvas.getBoundingClientRect();
     if (rect.width <= 0 || rect.height <= 0 || g.viewW <= 0 || g.viewH <= 0) return null;
 
-    // 先将浏览器窗口的 CSS 坐标映射到实际显示帧，再映射到 Chrome CSS viewport。
-    // 使用 rect 而不是 canvas.width/height 作为显示区域，避免页面布局缩放造成偏移。
-    const displayX = clientX - rect.left;
-    const displayY = clientY - rect.top;
-    if (displayX < 0 || displayY < 0 || displayX > rect.width || displayY > rect.height) return null;
-    const frameX = (displayX / rect.width) * g.frameW;
-    const frameY = (displayY / rect.height) * g.frameH;
+    // Canvas 元素铺满容器，但 object-fit: contain 会在两侧或上下留黑边。
+    // 必须先还原真正的视频内容矩形，不能把整个 Canvas 外框当作画面区域。
+    const scale = Math.min(rect.width / g.frameW, rect.height / g.frameH);
+    const contentW = g.frameW * scale;
+    const contentH = g.frameH * scale;
+    const offsetX = (rect.width - contentW) / 2;
+    const offsetY = (rect.height - contentH) / 2;
+    const displayX = clientX - rect.left - offsetX;
+    const displayY = clientY - rect.top - offsetY;
+    if (displayX < 0 || displayY < 0 || displayX >= contentW || displayY >= contentH) return null;
+    const frameX = displayX / scale;
+    const frameY = displayY / scale;
+    // CDP screencast metadata describes the actual visible content area.
+    // It can be shorter than window.innerHeight, so prefer per-frame dimensions.
+    const targetW = g.streamW || g.viewW;
+    const targetH = g.streamH || g.viewH;
     return {
-      x: Math.max(0, Math.min(g.viewW - 1, Math.round((frameX / g.frameW) * g.viewW))),
-      y: Math.max(0, Math.min(g.viewH - 1, Math.round((frameY / g.frameH) * g.viewH))),
+      x: Math.max(0, Math.min(targetW - 1, Math.round((frameX / g.frameW) * targetW))),
+      y: Math.max(0, Math.min(targetH - 1, Math.round((frameY / g.frameH) * targetH + g.offsetTop))),
     };
   }, []);
 
@@ -414,13 +423,6 @@ const BrowserView = () => {
     <div className="flex flex-col h-[calc(100vh-80px)] gap-4">
       {/* Tab 栏 */}
       <div className="flex items-center gap-2 overflow-x-auto">
-        <button
-          onClick={createTab}
-          className="flex items-center gap-1 px-3 py-1.5 bg-gradient-to-br from-violet-500/25 to-indigo-500/15 border border-violet-500/40 rounded-lg text-sm text-white hover:bg-violet-500/35 transition-colors whitespace-nowrap"
-        >
-          <Plus size={14} />
-          <span>{t('browser.addTab', '新建标签页')}</span>
-        </button>
         {tabList.map(tab => (
           <div
             key={tab.id}
@@ -442,6 +444,13 @@ const BrowserView = () => {
             )}
           </div>
         ))}
+        <button
+          onClick={createTab}
+          className="flex items-center gap-1 px-3 py-1.5 bg-gradient-to-br from-violet-500/25 to-indigo-500/15 border border-violet-500/40 rounded-lg text-sm text-white hover:bg-violet-500/35 transition-colors whitespace-nowrap shrink-0"
+        >
+          <Plus size={14} />
+          <span>{t('browser.addTab', '新建标签页')}</span>
+        </button>
       </div>
 
       {/* 地址栏 */}
@@ -495,7 +504,7 @@ const BrowserView = () => {
           onMouseMove={handleMouseMove}
           onWheel={handleWheel}
           tabIndex={0}
-          className="max-w-full max-h-full object-contain"
+          className="w-full h-full object-contain"
           style={{ cursor: urlFocused ? 'default' : 'crosshair', outline: 'none' }}
         />
       </div>

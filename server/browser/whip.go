@@ -240,6 +240,12 @@ func streamScreencastToDataChannel(sess *Session, dc *webrtc.DataChannel) {
 				var params struct {
 					Data      string `json:"data"`
 					SessionID int    `json:"sessionId"`
+					Metadata  struct {
+						DeviceWidth  int     `json:"deviceWidth"`
+						DeviceHeight int     `json:"deviceHeight"`
+						OffsetTop    float64 `json:"offsetTop"`
+						PageScale    float64 `json:"pageScaleFactor"`
+					} `json:"metadata"`
 				}
 				if err := json.Unmarshal(msg.Params, &params); err != nil {
 					continue
@@ -252,8 +258,12 @@ func streamScreencastToDataChannel(sess *Session, dc *webrtc.DataChannel) {
 
 				// 发元数据
 				meta, _ := json.Marshal(map[string]interface{}{
-					"type": "frame-start",
-					"size": len(data),
+					"type":          "frame-start",
+					"size":          len(data),
+					"device_width":  params.Metadata.DeviceWidth,
+					"device_height": params.Metadata.DeviceHeight,
+					"offset_top":    params.Metadata.OffsetTop,
+					"page_scale":    params.Metadata.PageScale,
 				})
 				if sendErr := dc.SendText(string(meta)); sendErr != nil {
 					log.Printf("[WHIP] send meta error: %v", sendErr)

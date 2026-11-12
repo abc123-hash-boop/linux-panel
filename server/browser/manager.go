@@ -163,6 +163,10 @@ func (m *SessionManager) CreateSession() (*Session, error) {
 		fmt.Printf("[Browser] viewport detection failed; using fallback 1920x1080\n")
 	}
 
+	// 监听网页通过 window.open、target=_blank 等方式创建的新页面，
+	// 自动将新页面设为当前 tab，并切换 WebRTC 串流目标。
+	go s.watchNewTabs()
+
 	// 加载并恢复会话状态
 	if state, err := loadSessionState(m.dataDir, id); err == nil && state != nil {
 		s.restoreState(state)
@@ -588,6 +592,47 @@ func (s *Session) refreshTabsFromChrome() error {
 		}
 	}
 	return nil
+}
+
+// watchNewTabs 监视 Chrome 新建的 page target。
+// Chrome 通过 window.open()、target="_blank" 或用户点击新窗口链接时，
+// 会创建新的 page target；检测到后自动激活它并切换当前串流。
+func (s *Session) watchNewTabs() {
+	known := make(map[string]bool)
+	if targets, err := s.pageTargets(); err == nil {
+		for _, target := range targets {
+			known[target.TargetID] = true
+		}
+	}
+
+	ticker := time.NewTicker(300 * time.Millisecond)
+	defer ticker.Stop()
+	for range ticker.C {
+		if s.IsClosed() {
+			return
+		}
+		targets, err := s.pageTargets()
+		if err != nil {
+			continue
+		}
+		for _, target := range targets {
+			if target.TargetID == "" || known[target.TargetID] {
+				continue
+			}
+			known[target.TargetID] = true
+
+			// 同步目标列表，确保 SwitchTab 能找到刚创建的 target。
+			if err := s.refreshTabsFromChrome(); err != nil {
+				fmt.Printf("[Browser] refresh tabs after popup failed: %v\n", err)
+				continue
+			}
+			if err := s.SwitchTab(target.TargetID); err != nil {
+				fmt.Printf("[Browser] auto activate new tab %s failed: %v\n", target.TargetID, err)
+				continue
+			}
+			fmt.Printf("[Browser] automatically switched to new tab: %s (%s)\n", target.Title, target.URL)
+		}
+	}
 }
 
 // cdpWSForTab 获取指定 tab 的 CDP ws URL

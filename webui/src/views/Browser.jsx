@@ -253,13 +253,16 @@ const BrowserView = () => {
       const tabs = await resp.json();
       if (!tabs || tabs.length === 0) return;
       setTabList(tabs);
-      if (!activeTabId) {
-        // 默认激活第一个（主）tab
-        const main = tabs.find(t => t.is_active) || tabs[0];
-        setActiveTabId(main.id);
+      // 后端可能因网页打开新窗口/新标签页而自动切换 active tab，
+      // 这里同步激活状态，让标签栏、地址栏跟随实际显示的页面。
+      const active = tabs.find(t => t.is_active) || tabs[0];
+      if (active) {
+        setActiveTabId(active.id);
+        setCurrentUrl(active.url || 'about:blank');
+        if (!urlFocused) setUrl(active.url || 'about:blank');
       }
     } catch (e) { console.error('refresh tabs err:', e); }
-  }, [activeTabId]);
+  }, [urlFocused]);
 
   useEffect(() => {
     if (!sessionId || status !== 'streaming') return;

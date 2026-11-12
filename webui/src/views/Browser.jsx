@@ -229,8 +229,8 @@ const BrowserView = () => {
         setSessionId(sess.id);
         geomRef.current.viewW = sess.view_w || 1920;
         geomRef.current.viewH = sess.view_h || 1080;
-        setCurrentUrl(sess.url || 'about:blank');
-        setUrl(sess.url || 'about:blank');
+        setCurrentUrl(sess.url || 'chrome://newtab');
+        setUrl(sess.url || 'chrome://newtab');
         setStatus('connecting');
 
         // 刷新 tab 列表
@@ -258,8 +258,8 @@ const BrowserView = () => {
       const active = tabs.find(t => t.is_active) || tabs[0];
       if (active) {
         setActiveTabId(active.id);
-        setCurrentUrl(active.url || 'about:blank');
-        if (!urlFocused) setUrl(active.url || 'about:blank');
+        setCurrentUrl(active.url || 'chrome://newtab');
+        if (!urlFocused) setUrl(active.url || 'chrome://newtab');
       }
     } catch (e) { console.error('refresh tabs err:', e); }
   }, [urlFocused]);
@@ -336,7 +336,7 @@ const BrowserView = () => {
     try {
       const resp = await fetch(`/browser/sessions/${sessionId}/tabs`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url: 'about:blank' }), credentials: 'include' });
+        body: JSON.stringify({ url: 'chrome://newtab' }), credentials: 'include' });
       if (!resp.ok) {
         const detail = await resp.json().catch(() => ({}));
         throw new Error(detail.error || `创建 tab 失败: HTTP ${resp.status}`);
@@ -375,7 +375,7 @@ const BrowserView = () => {
       await startStream(sessionId);
       // 刷新该 tab 的 URL 显示
       const tab = tabList.find(t => t.id === tabId);
-      if (tab) setUrl(tab.url || 'about:blank');
+      if (tab) setUrl(tab.url || 'chrome://newtab');
     } catch (e) { setError(e.message); }
   };
 
@@ -403,7 +403,7 @@ const BrowserView = () => {
   };
 
   const reload = () => {
-    if (currentUrl && currentUrl !== 'about:blank') {
+    if (currentUrl && currentUrl !== 'chrome://newtab') {
       setUrl(currentUrl);
       savePersistedUrl(currentUrl);
       fetch(`/browser/sessions/${sessionId}/navigate`, {

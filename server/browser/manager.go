@@ -336,12 +336,12 @@ func NewSession(id, profileDir string) *Session {
 		ProfileDir: profileDir,
 		tabs:       make(map[string]*Tab),
 	}
-	// 初始化主 tab（after:blank）
+	// 初始化主 tab（Chrome 新标签页）
 	s.mu.Lock()
 	mainTab := &Tab{
 		ID:        id + "-main",
-		Title:     "空白页",
-		URL:       "about:blank",
+		Title:     "New Tab",
+		URL:       "chrome://newtab",
 		IsActive:  true,
 		CreatedAt: time.Now(),
 	}
@@ -385,7 +385,7 @@ func (s *Session) Start() error {
 		fmt.Sprintf("--user-data-dir=%s", s.ProfileDir),
 		"--window-size=1920,1080",
 		"--force-device-scale-factor=1",
-		"about:blank",
+		"chrome://newtab",
 	}
 
 	cmd := exec.CommandContext(ctx, chromePath, args...)
@@ -419,7 +419,7 @@ func (s *Session) Start() error {
 	s.Port = parsed
 
 	s.mu.Lock()
-	s.CurrentURL = "about:blank"
+	s.CurrentURL = "chrome://newtab"
 	s.ViewW = 1920
 	s.ViewH = 1080
 	s.mu.Unlock()
@@ -680,7 +680,7 @@ func (s *Session) CreateTab(targetURL string) (*Tab, error) {
 		return nil, fmt.Errorf("chrome debugging endpoint is not ready")
 	}
 	if targetURL == "" {
-		targetURL = "about:blank"
+		targetURL = "chrome://newtab"
 	}
 
 	// Chrome 136+ requires PUT for /json/new. The endpoint returns a JSON

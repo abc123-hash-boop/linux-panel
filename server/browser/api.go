@@ -185,7 +185,7 @@ func createTabHandler(m *SessionManager) gin.HandlerFunc {
 			return
 		}
 		if req.URL == "" {
-			req.URL = "about:blank"
+			req.URL = "chrome://newtab"
 		}
 		tab, err := s.CreateTab(req.URL)
 		if err != nil {

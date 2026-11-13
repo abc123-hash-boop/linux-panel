@@ -2,12 +2,16 @@ package service
 
 import (
 	"crypto/rand"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
+	"time"
 
 	_ "modernc.org/sqlite"
 )
@@ -35,9 +39,84 @@ type NginxInfo struct {
 }
 
 type NginxSite struct {
-	Name    string `json:"name"`
-	Path    string `json:"path"`
-	Enabled bool   `json:"enabled"`
+	Name        string `json:"name"`
+	Path        string `json:"path"`
+	Enabled     bool   `json:"enabled"`
+	Domains     string `json:"domains"`
+	Root        string `json:"root"`
+	ProxyTarget string `json:"proxy_target"`
+	Kind        string `json:"kind"`
+	SSL         bool   `json:"ssl"`
+}
+
+var (
+	serverNameRE = regexp.MustCompile(`(?m)server_name\s+([^;]+);`)
+	rootRE       = regexp.MustCompile(`(?m)root\s+([^;]+);`)
+	proxyPassRE  = regexp.MustCompile(`(?m)proxy_pass\s+([^;]+);`)
+	listenSSLRE  = regexp.MustCompile(`(?mi)listen\s+[^;]*(443|ssl)`)
+	certRE       = regexp.MustCompile(`(?mi)ssl_certificate\s+([^;]+);`)
+	siteNameRE   = regexp.MustCompile(`^[A-Za-z0-9_.-]+\.conf$`)
+)
+
+func describeNginxSite(site *NginxSite) {
+	b, err := os.ReadFile(site.Path)
+	if err != nil {
+		return
+	}
+	content := string(b)
+	activeContent := regexp.MustCompile(`(?m)^\s*#.*$`).ReplaceAllString(content, "")
+	var domains []string
+	for _, m := range serverNameRE.FindAllStringSubmatch(activeContent, -1) {
+		if len(m) > 1 {
+			domains = append(domains, strings.Fields(m[1])...)
+		}
+	}
+	if len(domains) > 0 {
+		seen := map[string]bool{}
+		unique := make([]string, 0, len(domains))
+		for _, d := range domains {
+			if !seen[d] {
+				seen[d] = true
+				unique = append(unique, d)
+			}
+		}
+		site.Domains = strings.Join(unique, ", ")
+	}
+	if m := rootRE.FindStringSubmatch(activeContent); len(m) > 1 {
+		site.Root = strings.TrimSpace(m[1])
+	}
+	if m := proxyPassRE.FindStringSubmatch(activeContent); len(m) > 1 {
+		site.ProxyTarget = strings.TrimSpace(m[1])
+	}
+	site.SSL = listenSSLRE.MatchString(activeContent) || certRE.MatchString(activeContent)
+	switch {
+	case strings.Contains(activeContent, "fastcgi_pass"):
+		site.Kind = "php"
+	case strings.Contains(activeContent, "upstream "):
+		site.Kind = "loadbalance"
+	case regexp.MustCompile(`(?m)\breturn\s+30[1278]\s+`).MatchString(activeContent):
+		site.Kind = "redirect"
+	case site.ProxyTarget != "":
+		site.Kind = "proxy"
+	case site.Root != "":
+		site.Kind = "static"
+	default:
+		site.Kind = "custom"
+	}
+}
+
+func nginxSitePath(name string) (string, error) {
+	if name == "" || filepath.Base(name) != name || strings.ContainsAny(name, `/\\`) || strings.Contains(name, "..") {
+		return "", fmt.Errorf("invalid site name")
+	}
+	for _, dir := range []string{"/etc/nginx/sites-available", "/etc/nginx/conf.d"} {
+		for _, candidate := range []string{filepath.Join(dir, name), filepath.Join(dir, name+".disabled")} {
+			if st, err := os.Lstat(candidate); err == nil && st.Mode().IsRegular() {
+				return candidate, nil
+			}
+		}
+	}
+	return "", os.ErrNotExist
 }
 
 func NginxStatus() NginxInfo {
@@ -84,84 +163,231 @@ func NginxStatus() NginxInfo {
 
 func NginxSites() []NginxSite {
 	sites := []NginxSite{}
-
-	// sites-available
-	availDir := "/etc/nginx/sites-available"
-	enabledDir := "/etc/nginx/sites-enabled"
-
-	entries, _ := os.ReadDir(availDir)
-	for _, e := range entries {
-		if e.IsDir() {
+	availDir, enabledDir, confDir := "/etc/nginx/sites-available", "/etc/nginx/sites-enabled", "/etc/nginx/conf.d"
+	seen := map[string]bool{}
+	for _, item := range []struct {
+		dir       string
+		available bool
+	}{{availDir, true}, {confDir, false}} {
+		entries, err := os.ReadDir(item.dir)
+		if err != nil {
 			continue
 		}
-		name := e.Name()
-		enabled := false
-		if _, err := os.Stat(filepath.Join(enabledDir, name)); err == nil {
-			enabled = true
+		for _, e := range entries {
+			if e.IsDir() {
+				continue
+			}
+			entryName := e.Name()
+			disabled := strings.HasSuffix(entryName, ".conf.disabled")
+			if item.available {
+				if strings.HasPrefix(entryName, ".") || strings.HasSuffix(entryName, ".disabled") {
+					continue
+				}
+			} else if !strings.HasSuffix(entryName, ".conf") && !disabled {
+				continue
+			}
+			name := strings.TrimSuffix(entryName, ".disabled")
+			path := filepath.Join(item.dir, entryName)
+			if seen[path] {
+				continue
+			}
+			seen[path] = true
+			enabled := !disabled
+			if item.available {
+				link := filepath.Join(enabledDir, entryName)
+				if st, err := os.Lstat(link); err == nil && (st.Mode()&os.ModeSymlink != 0 || st.Mode().IsRegular()) {
+					enabled = true
+				} else {
+					enabled = false
+				}
+			}
+			st, err := os.Stat(path)
+			if err != nil || !st.Mode().IsRegular() {
+				continue
+			}
+			site := NginxSite{Name: name, Path: path, Enabled: enabled}
+			describeNginxSite(&site)
+			sites = append(sites, site)
 		}
-		sites = append(sites, NginxSite{
-			Name:    name,
-			Path:    filepath.Join(availDir, name),
-			Enabled: enabled,
-		})
 	}
-
-	// conf.d
-	confDir := "/etc/nginx/conf.d"
-	entries, _ = os.ReadDir(confDir)
-	for _, e := range entries {
-		if e.IsDir() {
-			continue
-		}
-		name := e.Name()
-		if !strings.HasSuffix(name, ".conf") {
-			continue
-		}
-		sites = append(sites, NginxSite{
-			Name:    name,
-			Path:    filepath.Join(confDir, name),
-			Enabled: true,
-		})
-	}
-
 	return sites
 }
 
+func NginxReadSite(name string) (string, string, error) {
+	p, err := nginxSitePath(name)
+	if err != nil {
+		return "", "", err
+	}
+	b, err := os.ReadFile(p)
+	if err != nil {
+		return "", "", err
+	}
+	h := sha256.Sum256(b)
+	return string(b), hex.EncodeToString(h[:]), nil
+}
+
+func nginxConfigTest() error {
+	out, err := exec.Command(nginxBin(), "-t").CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("nginx config test failed: %s", strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
+func nginxAtomicWrite(path string, data []byte, mode os.FileMode) error {
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".panel-nginx-*.tmp")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	defer os.Remove(tmpName)
+	if _, err = tmp.Write(data); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err = tmp.Sync(); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err = tmp.Chmod(mode); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err = tmp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmpName, path)
+}
+
+func nginxBackup(path string, data []byte) (string, error) {
+	backupDir := "/var/backups/linux-panel/nginx"
+	if err := os.MkdirAll(backupDir, 0700); err != nil {
+		return "", err
+	}
+	name := filepath.Base(path) + "." + fmt.Sprintf("%d", time.Now().UnixNano()) + ".bak"
+	backup := filepath.Join(backupDir, name)
+	if err := os.WriteFile(backup, data, 0600); err != nil {
+		return "", err
+	}
+	return backup, nil
+}
+
+func NginxUpdateSite(name, content, expectedVersion string) error {
+	p, err := nginxSitePath(name)
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(content) == "" {
+		return fmt.Errorf("configuration cannot be empty")
+	}
+	old, err := os.ReadFile(p)
+	if err != nil {
+		return err
+	}
+	if expectedVersion == "" {
+		return fmt.Errorf("resource version required")
+	}
+	h := sha256.Sum256(old)
+	if hex.EncodeToString(h[:]) != expectedVersion {
+		return fmt.Errorf("resource changed since it was loaded; refresh before saving")
+	}
+	info, err := os.Stat(p)
+	if err != nil {
+		return err
+	}
+	if _, err := nginxBackup(p, old); err != nil {
+		return fmt.Errorf("backup current config: %w", err)
+	}
+	if err := nginxAtomicWrite(p, []byte(content), info.Mode().Perm()); err != nil {
+		return err
+	}
+	if err := nginxConfigTest(); err != nil {
+		if restoreErr := nginxAtomicWrite(p, old, info.Mode().Perm()); restoreErr != nil {
+			return fmt.Errorf("%v; additionally failed to restore previous config: %w", err, restoreErr)
+		}
+		return fmt.Errorf("%v; previous config restored", err)
+	}
+	if err := NginxReload(); err != nil {
+		_ = nginxAtomicWrite(p, old, info.Mode().Perm())
+		_ = nginxConfigTest()
+		return fmt.Errorf("reload failed; previous config restored: %w", err)
+	}
+	return nil
+}
+
 func NginxEnableSite(name string) error {
-	avail := "/etc/nginx/sites-available"
-	enabled := "/etc/nginx/sites-enabled"
-
-	src := filepath.Join(avail, name)
-	dst := filepath.Join(enabled, name)
-
-	if _, err := os.Stat(src); err != nil {
+	p, err := nginxSitePath(name)
+	if err != nil {
 		return err
 	}
-
-	// 创建 symlink
-	if err := os.Symlink(src, dst); err != nil && !os.IsExist(err) {
+	if strings.HasPrefix(p, "/etc/nginx/conf.d/") {
+		if strings.HasSuffix(p, ".disabled") {
+			dst := strings.TrimSuffix(p, ".disabled")
+			if _, err := os.Lstat(dst); err == nil {
+				return fmt.Errorf("site config already exists: %s", dst)
+			}
+			if err := os.Rename(p, dst); err != nil {
+				return err
+			}
+		} else {
+			return fmt.Errorf("site is already enabled")
+		}
+	} else {
+		avail := filepath.Join("/etc/nginx/sites-available", name)
+		enabled := filepath.Join("/etc/nginx/sites-enabled", name)
+		if _, err := os.Stat(avail); err != nil {
+			return err
+		}
+		if _, err := os.Lstat(enabled); err == nil {
+			return fmt.Errorf("site is already enabled")
+		}
+		if err := os.Symlink(avail, enabled); err != nil {
+			return err
+		}
+	}
+	if err := nginxConfigTest(); err != nil {
+		if strings.HasPrefix(p, "/etc/nginx/conf.d/") {
+			_ = os.Rename(strings.TrimSuffix(p, ".disabled"), p)
+		} else {
+			_ = os.Remove(filepath.Join("/etc/nginx/sites-enabled", name))
+		}
 		return err
 	}
-
 	return NginxReload()
 }
 
-func NginxReload() error {
-	return NginxAction("reload")
-}
+func NginxReload() error { return NginxAction("reload") }
 
 func NginxDisableSite(name string) error {
-	enabled := "/etc/nginx/sites-enabled"
-	dst := filepath.Join(enabled, name)
-
-	if _, err := os.Stat(dst); err != nil {
+	p, err := nginxSitePath(name)
+	if err != nil {
 		return err
 	}
-
-	if err := os.Remove(dst); err != nil {
+	if strings.HasPrefix(p, "/etc/nginx/conf.d/") {
+		if strings.HasSuffix(p, ".disabled") {
+			return fmt.Errorf("site is already disabled")
+		}
+		if err := os.Rename(p, p+".disabled"); err != nil {
+			return err
+		}
+	} else {
+		enabled := filepath.Join("/etc/nginx/sites-enabled", name)
+		if _, err := os.Lstat(enabled); err != nil {
+			return fmt.Errorf("site is not enabled")
+		}
+		if err := os.Remove(enabled); err != nil {
+			return err
+		}
+	}
+	if err := nginxConfigTest(); err != nil {
+		if strings.HasPrefix(p, "/etc/nginx/conf.d/") {
+			_ = os.Rename(p+".disabled", p)
+		} else {
+			avail := filepath.Join("/etc/nginx/sites-available", name)
+			_ = os.Symlink(avail, filepath.Join("/etc/nginx/sites-enabled", name))
+		}
 		return err
 	}
-
 	return NginxReload()
 }
 
@@ -169,88 +395,154 @@ func NginxAction(action string) error {
 	if !nginxInstalled() {
 		return errNginxNotInstalled
 	}
-
-	// systemd 优先，fallback 直接调二进制
-	cmds := []string{
-		"systemctl", action, "nginx",
+	switch action {
+	case "start", "stop", "restart", "reload":
+	default:
+		return fmt.Errorf("unsupported nginx action: %s", action)
 	}
-	if err := exec.Command("systemctl", action, "nginx").Run(); err != nil {
-		// fallback: 直接调用 nginx 二进制
-		switch action {
-		case "start":
-			return exec.Command(nginxBin(), "-c", "/etc/nginx/nginx.conf").Run()
-		case "stop", "restart", "reload":
-			return exec.Command(nginxBin(), "-s", action).Run()
+	if err := exec.Command("systemctl", action, "nginx").Run(); err == nil {
+		return nil
+	}
+	switch action {
+	case "start":
+		return exec.Command(nginxBin(), "-c", "/etc/nginx/nginx.conf").Run()
+	case "stop", "restart", "reload":
+		return exec.Command(nginxBin(), "-s", action).Run()
+	}
+	return fmt.Errorf("nginx action failed")
+}
+
+func NginxCreateSite(name, content string) error {
+	if name == "" {
+		return fmt.Errorf("site name required")
+	}
+	if !strings.HasSuffix(name, ".conf") {
+		name += ".conf"
+	}
+	if !siteNameRE.MatchString(name) || strings.Contains(name, "..") {
+		return fmt.Errorf("invalid site name")
+	}
+	if strings.TrimSpace(content) == "" {
+		return fmt.Errorf("site configuration cannot be empty")
+	}
+	activeContent := regexp.MustCompile(`(?m)^\s*#.*$`).ReplaceAllString(content, "")
+	if !strings.Contains(activeContent, "server {") || !serverNameRE.MatchString(activeContent) {
+		return fmt.Errorf("a site must contain a server block and server_name")
+	}
+	availDir, enabledDir := "/etc/nginx/sites-available", "/etc/nginx/sites-enabled"
+	if err := os.MkdirAll(availDir, 0755); err != nil {
+		return err
+	}
+	if err := os.MkdirAll(enabledDir, 0755); err != nil {
+		return err
+	}
+	for _, candidate := range []string{filepath.Join(availDir, name), filepath.Join(enabledDir, name), filepath.Join("/etc/nginx/conf.d", name), filepath.Join("/etc/nginx/conf.d", name+".disabled")} {
+		if _, err := os.Lstat(candidate); err == nil {
+			return fmt.Errorf("site config already exists: %s", candidate)
 		}
-		_ = cmds
+	}
+	// Refuse a second site claiming an existing server_name.
+	newNames := strings.Fields(strings.ReplaceAll(serverNameRE.FindStringSubmatch(activeContent)[1], "_", ""))
+	for _, site := range NginxSites() {
+		for _, existing := range strings.Split(site.Domains, ",") {
+			for _, candidate := range newNames {
+				if strings.TrimSpace(existing) == candidate {
+					return fmt.Errorf("domain already belongs to site %s: %s", site.Name, candidate)
+				}
+			}
+		}
+	}
+	// For a newly-created PHP site, provision its document root and a small
+	// front controller so an empty directory does not immediately return 403/404.
+	if strings.Contains(activeContent, "fastcgi_pass") {
+		if match := rootRE.FindStringSubmatch(activeContent); len(match) > 1 {
+			docRoot := filepath.Clean(strings.TrimSpace(match[1]))
+			if filepath.IsAbs(docRoot) && (docRoot == "/var/www" || strings.HasPrefix(docRoot, "/var/www/")) {
+				if err := os.MkdirAll(docRoot, 0755); err != nil {
+					return fmt.Errorf("create PHP document root: %w", err)
+				}
+				indexFile := filepath.Join(docRoot, "index.php")
+				if _, err := os.Stat(indexFile); os.IsNotExist(err) {
+					placeholder := []byte("<?php\nhttp_response_code(200);\necho 'PHP site is ready. Upload your application files to this directory.';\n")
+					if err := os.WriteFile(indexFile, placeholder, 0644); err != nil {
+						return fmt.Errorf("create PHP front controller: %w", err)
+					}
+				}
+			}
+		}
+	}
+	filePath := filepath.Join(availDir, name)
+	if err := nginxAtomicWrite(filePath, []byte(content), 0644); err != nil {
+		return err
+	}
+	symlinkPath := filepath.Join(enabledDir, name)
+	if err := os.Symlink(filePath, symlinkPath); err != nil {
+		_ = os.Remove(filePath)
+		return err
+	}
+	if err := nginxConfigTest(); err != nil {
+		_ = os.Remove(symlinkPath)
+		_ = os.Remove(filePath)
+		return err
+	}
+	if err := NginxReload(); err != nil {
+		_ = os.Remove(symlinkPath)
+		_ = os.Remove(filePath)
+		return fmt.Errorf("reload failed: %w", err)
 	}
 	return nil
 }
 
-func NginxCreateSite(name, content string) error {
-	if name == "" || !strings.HasSuffix(name, ".conf") {
-		name = name + ".conf"
-	}
-	availDir := "/etc/nginx/sites-available"
-	enabledDir := "/etc/nginx/sites-enabled"
-
-	// 确保持有目录
-	_ = os.MkdirAll(availDir, 0755)
-	_ = os.MkdirAll(enabledDir, 0755)
-
-	filePath := filepath.Join(availDir, name)
-	if err := os.WriteFile(filePath, []byte(content), 0644); err != nil {
+func NginxDeleteSite(name string) error {
+	p, err := nginxSitePath(name)
+	if err != nil {
 		return err
 	}
-
-	// 自动软链到 sites-enabled
-	symlinkPath := filepath.Join(enabledDir, name)
-	if _, err := os.Lstat(symlinkPath); err != nil {
-		_ = os.Symlink(filePath, symlinkPath)
+	if !strings.HasPrefix(p, "/etc/nginx/sites-available/") && !strings.HasPrefix(p, "/etc/nginx/conf.d/") {
+		return fmt.Errorf("unsupported site config location")
 	}
-
-	// 校验配置
-	if out, err := exec.Command(nginxBin(), "-t").CombinedOutput(); err != nil {
-		// 配置错误，回滚删除并返回错误
-		_ = os.Remove(filePath)
-		_ = os.Remove(symlinkPath)
-		return errString("nginx config test failed:\n" + string(out))
+	if strings.HasSuffix(p, ".disabled") {
+		return os.Remove(p)
 	}
-
-	return NginxReload()
-}
-
-func NginxDeleteSite(name string) error {
-	availDir := "/etc/nginx/sites-available"
-	enabledDir := "/etc/nginx/sites-enabled"
-
-	avail := filepath.Join(availDir, name)
-	enabled := filepath.Join(enabledDir, name)
-
-	if _, err := os.Stat(avail); err != nil {
-		alt := filepath.Join("/etc/nginx/conf.d", name)
-		if _, err2 := os.Stat(alt); err2 == nil {
-			if err := os.Remove(alt); err != nil {
-				return err
-			}
-		} else {
+	data, err := os.ReadFile(p)
+	if err != nil {
+		return err
+	}
+	if _, err := nginxBackup(p, data); err != nil {
+		return fmt.Errorf("backup current config: %w", err)
+	}
+	backupPath := p + ".panel-delete-backup"
+	if err := os.Rename(p, backupPath); err != nil {
+		return err
+	}
+	link := filepath.Join("/etc/nginx/sites-enabled", name)
+	linkRemoved := false
+	if _, err := os.Lstat(link); err == nil {
+		if err := os.Remove(link); err != nil {
+			_ = os.Rename(backupPath, p)
 			return err
 		}
-	} else {
-		if err := os.Remove(avail); err != nil {
-			return err
+		linkRemoved = true
+	}
+	if err := nginxConfigTest(); err != nil {
+		_ = os.Rename(backupPath, p)
+		if linkRemoved {
+			_ = os.Symlink(p, link)
 		}
+		return fmt.Errorf("delete rejected because nginx config test failed: %w", err)
 	}
-
-	if _, err := os.Lstat(enabled); err == nil {
-		_ = os.Remove(enabled)
+	if err := NginxReload(); err != nil {
+		_ = os.Rename(backupPath, p)
+		if linkRemoved {
+			_ = os.Symlink(p, link)
+		}
+		_ = nginxConfigTest()
+		return fmt.Errorf("reload failed; site restored: %w", err)
 	}
-
-	// 清理该站点关联的附加数据库
-	path := filepath.Join("/var/lib/sqlite", strings.TrimSuffix(name, ".conf")+".db")
-	SqlDeleteDB(path)
-
-	return NginxReload()
+	if err := os.Remove(backupPath); err != nil {
+		return fmt.Errorf("site disabled but backup cleanup failed: %w", err)
+	}
+	return nil
 }
 
 func nginxInstalled() bool {
@@ -285,15 +577,15 @@ var errNginxNotInstalled = errString("nginx is not installed")
 // ============ SQLite ============
 
 type SqlTable struct {
-	Name    string `json:"name"`
-	Rows    int64  `json:"rows"`
+	Name string `json:"name"`
+	Rows int64  `json:"rows"`
 }
 
 type SqlDB struct {
-	Path    string     `json:"path"`
-	Size    int64      `json:"size"`
-	Tables  []SqlTable `json:"tables"`
-	CreatedAt string   `json:"created_at"`
+	Path      string     `json:"path"`
+	Size      int64      `json:"size"`
+	Tables    []SqlTable `json:"tables"`
+	CreatedAt string     `json:"created_at"`
 }
 
 type CreateDBRequest struct {
@@ -395,16 +687,39 @@ CREATE TABLE config (
 // SqlDeleteDB 删除附加数据库（配合站点删除）
 func SqlDeleteDB(dbPath string) error {
 	if dbPath == "" {
-		return nil
+		return fmt.Errorf("database path required")
 	}
-	if _, err := os.Stat(dbPath); os.IsNotExist(err) {
-		return nil
-	}
-	if err := os.Remove(dbPath); err != nil {
+	abs, err := filepath.Abs(filepath.Clean(dbPath))
+	if err != nil {
 		return err
 	}
-	manifest := dbPath + ".manifest"
-	os.Remove(manifest)
+	allowed := false
+	for _, root := range []string{"/var/lib", "/data", "/srv", "/opt", "/home", "/root", "/tmp"} {
+		rootAbs, _ := filepath.Abs(root)
+		if strings.HasPrefix(abs, rootAbs+string(os.PathSeparator)) {
+			allowed = true
+			break
+		}
+	}
+	base := filepath.Base(abs)
+	if !allowed || !(strings.HasSuffix(base, ".db") || strings.HasSuffix(base, ".sqlite") || strings.HasSuffix(base, ".sqlite3")) {
+		return fmt.Errorf("database path is outside the allowed SQLite locations")
+	}
+	info, err := os.Lstat(abs)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if !info.Mode().IsRegular() {
+		return fmt.Errorf("database path must be a regular file")
+	}
+	if err := os.Remove(abs); err != nil {
+		return err
+	}
+	manifest := abs + ".manifest"
+	_ = os.Remove(manifest)
 	return nil
 }
 
@@ -537,9 +852,9 @@ func SqlQuery(dbPath, query string) (map[string]interface{}, error) {
 	if len(records) == 0 {
 		// 可能是非 SELECT 语句
 		return map[string]interface{}{
-			"columns":  cols,
-			"rows":     []map[string]interface{}{},
-			"message":  "OK (0 rows)",
+			"columns": cols,
+			"rows":    []map[string]interface{}{},
+			"message": "OK (0 rows)",
 		}, nil
 	}
 

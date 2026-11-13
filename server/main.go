@@ -112,9 +112,11 @@ func main() {
 			"/sites/nginx/sites",
 			panelApi.NginxSitesHandler,
 		)
+		protected.GET("/sites/nginx/site/:name/config", panelApi.NginxSiteConfig)
+		protected.PUT("/sites/nginx/site/:name/config", panelApi.NginxSiteConfig)
 		protected.POST(
 			"/sites/nginx/site/create",
-			panelApi.CreateSite,
+			panelApi.NginxCreateSite,
 		)
 		protected.POST(
 			"/sites/nginx/site/:name/:action",
@@ -140,6 +142,9 @@ func main() {
 			"/sites/sql/delete",
 			panelApi.SqlDeleteDB,
 		)
+		protected.GET("/sites/mariadb", panelApi.MariaDBDatabases)
+		protected.POST("/sites/mariadb/create", panelApi.MariaDBCreate)
+		protected.POST("/sites/mariadb/delete", panelApi.MariaDBDelete)
 
 		/*
 		 * ========================================================

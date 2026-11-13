@@ -68,6 +68,18 @@ Copilot 支持配置兼容的模型服务 Provider，包括自定义 API Base UR
 - creack/pty：主机终端
 - Pion WebRTC：浏览器画面传输
 - SQLite（modernc.org/sqlite）：本地数据持久化
+- MariaDB：通过本机 Unix Socket 管理数据库、专用用户与授权（需安装 MariaDB Server）
+
+## 站点与数据库管理
+
+Sites 页面提供 Nginx、MariaDB 与 SQLite 三个管理入口：
+
+- **MariaDB**：查看业务数据库、关联的 `localhost` 用户、表数量与数据大小；创建数据库时同时创建专用用户，仅授予该数据库权限。密码留空时自动生成，并且只在创建成功时返回一次。
+- **删除 MariaDB 数据库**：会删除数据库及其专用用户；如果该用户还拥有其他数据库的授权，Panel 会拒绝删除，避免影响其他应用。
+- **SQLite**：管理本地 SQLite 文件数据库。SQLite 不使用 MariaDB 用户名或主机配置，适合轻量级本地应用。
+- **PHP 站点附加数据库**：创建 PHP 站点时仍可勾选附加 MariaDB 数据库，创建流程与数据库管理页共用同一套 MariaDB 服务逻辑。
+
+WordPress 等 PHP 应用应选择 MariaDB，并使用创建成功时显示的数据库名、用户名、密码和主机（`127.0.0.1`）。不要使用 MariaDB 管理员 root 账户连接 PHP 应用。
 
 ## 环境要求
 
@@ -77,6 +89,7 @@ Copilot 支持配置兼容的模型服务 Provider，包括自定义 API Base UR
 - Docker Engine（使用 Docker 模块时需要）
 - Chrome 或 Chromium（使用 Browser 模块时需要）
 - Nginx（使用 Sites 模块中的 Nginx 管理功能时需要）
+- MariaDB Server（使用 Sites → MariaDB 数据库管理时需要；Panel 需以具备本地 MariaDB 管理权限的账户运行）
 
 Docker、Chrome、Nginx 属于可选运行依赖，不使用对应模块时无需全部安装。
 

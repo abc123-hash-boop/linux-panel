@@ -2,6 +2,7 @@ package api
 
 import (
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 
@@ -18,11 +19,46 @@ func NginxSitesHandler(c *gin.Context) {
 	c.JSON(http.StatusOK, service.NginxSites())
 }
 
+// NginxSiteConfig GET/PUT /api/sites/nginx/site/:name/config
+func NginxSiteConfig(c *gin.Context) {
+	name := c.Param("name")
+	if c.Request.Method == http.MethodGet {
+		content, version, err := service.NginxReadSite(name)
+		if err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"name": name, "content": content, "resourceVersion": version})
+		return
+	}
+	var req struct {
+		Content         string `json:"content"`
+		ResourceVersion string `json:"resourceVersion"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if err := service.NginxUpdateSite(name, req.Content, req.ResourceVersion); err != nil {
+		status := http.StatusBadRequest
+		if strings.Contains(err.Error(), "resource changed") {
+			status = http.StatusConflict
+		}
+		c.JSON(status, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true})
+}
+
 // NginxCreateSite POST /api/sites/nginx/site/create
 func NginxCreateSite(c *gin.Context) {
 	var req struct {
-		Name    string `json:"name"`
-		Content string `json:"content"`
+		Name           string `json:"name"`
+		Content        string `json:"content"`
+		CreateDatabase bool   `json:"createDatabase"`
+		DatabaseName   string `json:"databaseName"`
+		DatabaseUser   string `json:"databaseUser"`
+		DatabasePass   string `json:"databasePassword"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -33,12 +69,39 @@ func NginxCreateSite(c *gin.Context) {
 		return
 	}
 
+	var database *service.MariaDBCredentials
+	if req.CreateDatabase {
+		if !strings.Contains(req.Content, "fastcgi_pass") {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "附加 MariaDB 数据库仅适用于 PHP 站点"})
+			return
+		}
+		created, err := service.MariaDBCreateDatabase(req.DatabaseName, req.DatabaseUser, req.DatabasePass)
+		if err != nil {
+			status := http.StatusBadRequest
+			if strings.Contains(err.Error(), "cannot connect") || strings.Contains(err.Error(), "command failed") {
+				status = http.StatusServiceUnavailable
+			}
+			c.JSON(status, gin.H{"error": err.Error()})
+			return
+		}
+		database = &created
+	}
+
 	if err := service.NginxCreateSite(req.Name, req.Content); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		if database != nil {
+			_ = service.MariaDBDeleteDatabase(database.Database, database.Username)
+		}
+		status := http.StatusInternalServerError
+		if strings.Contains(err.Error(), "already exists") || strings.Contains(err.Error(), "already belongs") {
+			status = http.StatusConflict
+		} else if strings.Contains(err.Error(), "invalid") || strings.Contains(err.Error(), "required") || strings.Contains(err.Error(), "must contain") {
+			status = http.StatusBadRequest
+		}
+		c.JSON(status, gin.H{"error": err.Error()})
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"success": true})
+	c.JSON(http.StatusCreated, gin.H{"success": true, "database": database})
 }
 
 func NginxSiteAction(c *gin.Context) {
@@ -150,41 +213,58 @@ func SqlDeleteDB(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"success": true})
 }
 
-// CreateSite POST /api/sites/nginx/site/create { name, content, dbName, dbPassword }
-func CreateSite(c *gin.Context) {
+// MariaDBDatabases GET /api/sites/mariadb
+func MariaDBDatabases(c *gin.Context) {
+	databases, err := service.MariaDBListDatabases()
+	if err != nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"databases": databases})
+}
+
+// MariaDBCreate POST /api/sites/mariadb/create
+func MariaDBCreate(c *gin.Context) {
 	var req struct {
-		Name     string `json:"name"`
-		Content  string `json:"content"`
-		DBName   string `json:"dbName"`   // optional: SQLite database name (for PHP)
-		DBPasswd string `json:"dbPassword"` // optional: custom password (auto-generate if empty)
+		Database string `json:"database"`
+		Username string `json:"username"`
+		Password string `json:"password"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-
-	// 如果是 PHP 模式且需要数据库，先创建数据库
-	var dbPath string
-	if req.DBName != "" {
-		dbRes, err := service.SqlCreateDB(service.CreateDBRequest{
-			Name:     req.DBName,
-			Password: req.DBPasswd,
-		})
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create database: " + err.Error()})
-			return
+	credentials, err := service.MariaDBCreateDatabase(req.Database, req.Username, req.Password)
+	if err != nil {
+		status := http.StatusBadRequest
+		if strings.Contains(err.Error(), "cannot connect") || strings.Contains(err.Error(), "command failed") {
+			status = http.StatusServiceUnavailable
+		} else if strings.Contains(err.Error(), "already exists") {
+			status = http.StatusConflict
 		}
-		dbPath = dbRes.Path
-	}
-
-	// 写入并启用站点
-	if err := service.NginxCreateSite(req.Name, req.Content); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		c.JSON(status, gin.H{"error": err.Error()})
 		return
 	}
+	c.JSON(http.StatusCreated, gin.H{"success": true, "credentials": credentials})
+}
 
-	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"dbPath":  dbPath,
-	})
+// MariaDBDelete POST /api/sites/mariadb/delete
+func MariaDBDelete(c *gin.Context) {
+	var req struct {
+		Database string `json:"database"`
+		Username string `json:"username"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if err := service.MariaDBDeleteManagedDatabase(req.Database, req.Username); err != nil {
+		status := http.StatusBadRequest
+		if strings.Contains(err.Error(), "cannot verify") {
+			status = http.StatusServiceUnavailable
+		}
+		c.JSON(status, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true})
 }

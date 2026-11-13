@@ -607,13 +607,22 @@ const MariaDBTab = () => {
   const [error, setError] = useState('');
   const [form, setForm] = useState({ database: '', username: '', password: '' });
   const [credentials, setCredentials] = useState(null);
+  const [users, setUsers] = useState([]);
+  const [userForm, setUserForm] = useState({ username: '', password: '' });
+  const [userCredentials, setUserCredentials] = useState(null);
+  const [userBusy, setUserBusy] = useState(false);
+  const [grantTargets, setGrantTargets] = useState({});
 
   const load = async () => {
     setLoading(true);
     setError('');
     try {
-      const { data } = await apiClient.get('/sites/mariadb');
-      setDatabases(data.databases || []);
+      const [dbResponse, userResponse] = await Promise.all([
+        apiClient.get('/sites/mariadb'),
+        apiClient.get('/sites/mariadb/users'),
+      ]);
+      setDatabases(dbResponse.data.databases || []);
+      setUsers(userResponse.data.users || []);
     } catch (e) {
       setError(e.response?.data?.error || e.message || '无法读取 MariaDB 数据库');
     } finally { setLoading(false); }
@@ -632,6 +641,40 @@ const MariaDBTab = () => {
     } catch (e) {
       setError(e.response?.data?.error || e.message || '创建数据库失败');
     } finally { setCreating(false); }
+  };
+
+  const createUser = async (e) => {
+    e.preventDefault(); setUserBusy(true); setError(''); setUserCredentials(null);
+    try {
+      const { data } = await apiClient.post('/sites/mariadb/users/create', userForm);
+      setUserCredentials(data.credentials);
+      setUserForm({ username: '', password: '' });
+      await load();
+    } catch (e) { setError(e.response?.data?.error || e.message || '创建用户失败'); }
+    finally { setUserBusy(false); }
+  };
+
+  const resetUserPassword = async (username) => {
+    if (!window.confirm(`确定重置用户 ${username} 的密码？旧密码将立即失效。`)) return;
+    setUserBusy(true); setError('');
+    try {
+      const { data } = await apiClient.post('/sites/mariadb/users/password', { username });
+      setUserCredentials({ username, password: data.password, host: data.host });
+    } catch (e) { setError(e.response?.data?.error || e.message || '重置密码失败'); }
+    finally { setUserBusy(false); }
+  };
+
+  const updateUserGrant = async (username, database, grant) => {
+    if (!database) return;
+    const action = grant ? 'grant' : 'revoke';
+    const message = grant ? `授予 ${username} 对 ${database} 的全部数据库权限？` : `撤销 ${username} 对 ${database} 的全部数据库权限？`;
+    if (!window.confirm(message)) return;
+    setUserBusy(true); setError('');
+    try {
+      await apiClient.post(`/sites/mariadb/users/${action}`, { username, database });
+      await load();
+    } catch (e) { setError(e.response?.data?.error || e.message || '更新用户授权失败'); }
+    finally { setUserBusy(false); }
   };
 
   const remove = async (db, username) => {
@@ -687,6 +730,28 @@ const MariaDBTab = () => {
             <Database size={17} className="text-sky-300"/><div className="flex-1 min-w-0"><div className="text-sm text-white font-medium break-all">{db.name}</div><div className="text-xs text-white/40 mt-1">{db.tables} 张表 · {formatSize(db.size)} · 用户：{db.users?.length ? db.users.join(', ') : '未检测到专用用户'}</div></div>
             {db.users?.length === 1 && <button onClick={() => remove(db.name, db.users[0])} className="glass-btn px-2.5 py-1.5 rounded-lg text-xs text-red-300 flex items-center gap-1"><Trash2 size={12}/>删除</button>}
             {db.users?.length > 1 && <span className="text-xs text-white/35">多个用户关联，暂不支持一键删除</span>}
+          </div>)}
+        </div>}
+      </div>
+
+      <div className="glass-panel rounded-2xl p-4 space-y-3">
+        <div><h3 className="text-sm font-semibold text-white">MariaDB 用户管理</h3><p className="text-xs text-white/45 mt-1">可单独创建账户、重置密码，并为同一用户授权多个数据库。新用户默认没有任何数据库权限。</p></div>
+        <form onSubmit={createUser} className="grid grid-cols-1 md:grid-cols-3 gap-2">
+          <input required maxLength={32} pattern="[A-Za-z][A-Za-z0-9_]*" value={userForm.username} onChange={e => setUserForm(v => ({ ...v, username: e.target.value }))} placeholder="新用户名（最多32位）" className="glass-input rounded-lg px-3 py-2 text-sm" />
+          <input type="password" autoComplete="new-password" minLength={userForm.password ? 12 : undefined} maxLength={128} value={userForm.password} onChange={e => setUserForm(v => ({ ...v, password: e.target.value }))} placeholder="密码（留空自动生成）" className="glass-input rounded-lg px-3 py-2 text-sm" />
+          <button type="submit" disabled={userBusy} className="glass-btn rounded-lg px-3 py-2 text-sm text-emerald-300 flex items-center justify-center gap-2 disabled:opacity-50"><Plus size={15}/>创建独立用户</button>
+        </form>
+        {userCredentials && <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-3 space-y-2">
+          <div className="text-sm font-semibold text-emerald-200">用户凭据（请立即保存）</div>
+          {[['用户名', userCredentials.username], ['密码', userCredentials.password], ['主机', userCredentials.host || '127.0.0.1']].map(([label, value]) => <div key={label} className="flex items-center gap-2 text-sm"><span className="w-14 text-white/50">{label}</span><code className="flex-1 min-w-0 break-all text-white">{value}</code><button onClick={() => copy(value)} className="glass-btn p-1.5 rounded-md text-white/70"><Copy size={13}/></button></div>)}
+          <p className="text-xs text-amber-200/80">密码只显示本次操作结果，不会保存或再次读取。</p>
+          <button onClick={() => setUserCredentials(null)} className="text-xs text-white/50 underline">已保存，关闭</button>
+        </div>}
+        {users.length === 0 ? <p className="text-sm text-white/40 text-center py-5">{loading ? '正在加载…' : '暂无普通 MariaDB 用户'}</p> : <div className="space-y-2">
+          {users.map(user => <div key={`${user.username}@${user.host}`} className="glass-input rounded-xl p-3 space-y-3">
+            <div className="flex flex-wrap items-center gap-2"><div className="flex-1 min-w-0"><div className="text-sm text-white font-medium">{user.username}<span className="text-xs text-white/35 ml-2">@{user.host}</span></div><div className="text-xs text-white/45 mt-1">授权数据库：{user.databases?.length ? user.databases.join(', ') : '无'}</div></div><button disabled={userBusy} onClick={() => resetUserPassword(user.username)} className="glass-btn px-2.5 py-1.5 rounded-lg text-xs text-amber-200 disabled:opacity-50">重置密码</button></div>
+            <div className="flex flex-wrap items-center gap-2"><select value={grantTargets[user.username] || ''} onChange={e => setGrantTargets(v => ({ ...v, [user.username]: e.target.value }))} className="glass-input rounded-lg px-2 py-1.5 text-xs min-w-0 flex-1"><option value="">选择数据库以授权</option>{databases.filter(db => !user.databases?.includes(db.name)).map(db => <option key={db.name} value={db.name}>{db.name}</option>)}</select><button disabled={userBusy || !grantTargets[user.username]} onClick={() => updateUserGrant(user.username, grantTargets[user.username], true)} className="glass-btn px-2.5 py-1.5 rounded-lg text-xs text-emerald-300 disabled:opacity-40">授予权限</button></div>
+            {user.databases?.length > 0 && <div className="flex flex-wrap gap-1.5">{user.databases.map(db => <button key={db} disabled={userBusy} onClick={() => updateUserGrant(user.username, db, false)} title="点击撤销此数据库权限" className="rounded-md bg-sky-500/10 border border-sky-400/20 px-2 py-1 text-[11px] text-sky-200 disabled:opacity-40">{db} ×</button>)}</div>}
           </div>)}
         </div>}
       </div>

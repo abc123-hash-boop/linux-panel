@@ -42,3 +42,21 @@ func TestRandomMariaPassword(t *testing.T) {
 		t.Fatalf("got password length %d, want 28", len(password))
 	}
 }
+
+func TestMariaDBUserManagementRejectsInvalidInput(t *testing.T) {
+	if _, err := MariaDBCreateUser("bad-name", "LongEnoughPassword_123"); err == nil {
+		t.Fatal("expected invalid username to be rejected")
+	}
+	if _, err := MariaDBCreateUser("valid_user", "short"); err == nil {
+		t.Fatal("expected short password to be rejected")
+	}
+	if _, err := MariaDBResetUserPassword("bad-name", "LongEnoughPassword_123"); err == nil {
+		t.Fatal("expected invalid username for password reset to be rejected")
+	}
+	if err := MariaDBGrantDatabase("bad-name", "valid_db"); err == nil {
+		t.Fatal("expected invalid grant username to be rejected")
+	}
+	if err := MariaDBRevokeDatabase("valid_user", "bad-name"); err == nil {
+		t.Fatal("expected invalid revoke database to be rejected")
+	}
+}

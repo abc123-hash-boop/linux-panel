@@ -201,3 +201,166 @@ func MariaDBDeleteManagedDatabase(database, username string) error {
 	}
 	return runMariaDB(fmt.Sprintf("DROP DATABASE IF EXISTS `%s`;\nDROP USER IF EXISTS %s@'localhost';\n", database, sqlStringLiteral(username)))
 }
+
+// MariaDBUser describes a local application account and the schemas it can access.
+type MariaDBUser struct {
+	Username  string   `json:"username"`
+	Host      string   `json:"host"`
+	Databases []string `json:"databases"`
+}
+
+// MariaDBListUsers lists non-system localhost accounts and their schema grants.
+func MariaDBListUsers() ([]MariaDBUser, error) {
+	query := `SELECT u.User, COALESCE((SELECT GROUP_CONCAT(DISTINCT d.Db ORDER BY d.Db SEPARATOR ',') FROM mysql.db d WHERE d.User=u.User AND d.Host=u.Host), '')
+FROM mysql.user u
+WHERE u.Host='localhost' AND u.User NOT IN ('root','mysql','mariadb.sys','debian-sys-maint')
+ORDER BY u.User;`
+	cmd := exec.Command("mariadb", "--protocol=socket", "--batch", "--skip-column-names", "--execute", query)
+	var out, stderr bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &out, &stderr
+	if err := cmd.Run(); err != nil {
+		msg := strings.TrimSpace(stderr.String())
+		if msg == "" {
+			msg = err.Error()
+		}
+		return nil, fmt.Errorf("cannot list MariaDB users: %s", msg)
+	}
+	users := make([]MariaDBUser, 0)
+	for _, line := range strings.Split(strings.TrimSpace(out.String()), "\n") {
+		if line == "" {
+			continue
+		}
+		fields := strings.SplitN(line, "\t", 2)
+		if len(fields) != 2 {
+			continue
+		}
+		user := MariaDBUser{Username: fields[0], Host: "localhost", Databases: []string{}}
+		if fields[1] != "" {
+			user.Databases = strings.Split(fields[1], ",")
+		}
+		users = append(users, user)
+	}
+	return users, nil
+}
+
+// MariaDBCreateUser creates a local account without granting database access.
+func MariaDBCreateUser(username, password string) (MariaDBCredentials, error) {
+	if !validMariaIdentifier(username, 32) {
+		return MariaDBCredentials{}, fmt.Errorf("invalid database username: use 1-32 letters, numbers or underscores; start with a letter")
+	}
+	if password == "" {
+		var err error
+		password, err = randomMariaPassword(28)
+		if err != nil {
+			return MariaDBCredentials{}, fmt.Errorf("generate database password: %w", err)
+		}
+	}
+	if len(password) < 12 || len(password) > 128 || strings.ContainsAny(password, "\x00\r\n") {
+		return MariaDBCredentials{}, fmt.Errorf("database password must be 12-128 characters and contain no control characters")
+	}
+	user := sqlStringLiteral(username)
+	check := fmt.Sprintf("SELECT COUNT(*) FROM mysql.user WHERE User=%s AND Host='localhost';", user)
+	cmd := exec.Command("mariadb", "--protocol=socket", "--batch", "--skip-column-names", "--execute", check)
+	var out, stderr bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &out, &stderr
+	if err := cmd.Run(); err != nil {
+		msg := strings.TrimSpace(stderr.String())
+		if msg == "" {
+			msg = err.Error()
+		}
+		return MariaDBCredentials{}, fmt.Errorf("cannot connect to local MariaDB: %s", msg)
+	}
+	if strings.TrimSpace(out.String()) != "0" {
+		return MariaDBCredentials{}, fmt.Errorf("MariaDB user %q@localhost already exists", username)
+	}
+	if err := runMariaDB(fmt.Sprintf("CREATE USER %s@'localhost' IDENTIFIED BY %s;\n", user, sqlStringLiteral(password))); err != nil {
+		return MariaDBCredentials{}, err
+	}
+	return MariaDBCredentials{Username: username, Password: password, Host: "127.0.0.1"}, nil
+}
+
+// MariaDBResetUserPassword changes a local account password and returns it once.
+func MariaDBResetUserPassword(username, password string) (string, error) {
+	if !validMariaIdentifier(username, 32) {
+		return "", fmt.Errorf("invalid database username")
+	}
+	if password == "" {
+		var err error
+		password, err = randomMariaPassword(28)
+		if err != nil {
+			return "", fmt.Errorf("generate database password: %w", err)
+		}
+	}
+	if len(password) < 12 || len(password) > 128 || strings.ContainsAny(password, "\x00\r\n") {
+		return "", fmt.Errorf("database password must be 12-128 characters and contain no control characters")
+	}
+	check := fmt.Sprintf("SELECT COUNT(*) FROM mysql.user WHERE User=%s AND Host='localhost';", sqlStringLiteral(username))
+	cmd := exec.Command("mariadb", "--protocol=socket", "--batch", "--skip-column-names", "--execute", check)
+	var out, stderr bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &out, &stderr
+	if err := cmd.Run(); err != nil {
+		msg := strings.TrimSpace(stderr.String())
+		if msg == "" {
+			msg = err.Error()
+		}
+		return "", fmt.Errorf("cannot verify MariaDB user: %s", msg)
+	}
+	if strings.TrimSpace(out.String()) != "1" {
+		return "", fmt.Errorf("MariaDB user %q@localhost does not exist", username)
+	}
+	if err := runMariaDB(fmt.Sprintf("ALTER USER %s@'localhost' IDENTIFIED BY %s;\n", sqlStringLiteral(username), sqlStringLiteral(password))); err != nil {
+		return "", err
+	}
+	return password, nil
+}
+
+// MariaDBGrantDatabase grants full privileges on one existing schema to a local user.
+func MariaDBGrantDatabase(username, database string) error {
+	if !validMariaIdentifier(username, 32) || !validMariaIdentifier(database, 64) {
+		return fmt.Errorf("invalid database or username")
+	}
+	check := fmt.Sprintf("SELECT (SELECT COUNT(*) FROM mysql.user WHERE User=%s AND Host='localhost'), (SELECT COUNT(*) FROM information_schema.SCHEMATA WHERE SCHEMA_NAME=%s);", sqlStringLiteral(username), sqlStringLiteral(database))
+	cmd := exec.Command("mariadb", "--protocol=socket", "--batch", "--skip-column-names", "--execute", check)
+	var out, stderr bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &out, &stderr
+	if err := cmd.Run(); err != nil {
+		msg := strings.TrimSpace(stderr.String())
+		if msg == "" {
+			msg = err.Error()
+		}
+		return fmt.Errorf("cannot verify MariaDB user/database: %s", msg)
+	}
+	parts := strings.Fields(strings.TrimSpace(out.String()))
+	if len(parts) != 2 {
+		return fmt.Errorf("unexpected MariaDB preflight response")
+	}
+	if parts[0] != "1" {
+		return fmt.Errorf("MariaDB user %q@localhost does not exist", username)
+	}
+	if parts[1] != "1" {
+		return fmt.Errorf("database %q does not exist", database)
+	}
+	return runMariaDB(fmt.Sprintf("GRANT ALL PRIVILEGES ON `%s`.* TO %s@'localhost';\n", database, sqlStringLiteral(username)))
+}
+
+// MariaDBRevokeDatabase removes one schema grant without dropping the schema.
+func MariaDBRevokeDatabase(username, database string) error {
+	if !validMariaIdentifier(username, 32) || !validMariaIdentifier(database, 64) {
+		return fmt.Errorf("invalid database or username")
+	}
+	check := fmt.Sprintf("SELECT COUNT(*) FROM mysql.user WHERE User=%s AND Host='localhost';", sqlStringLiteral(username))
+	cmd := exec.Command("mariadb", "--protocol=socket", "--batch", "--skip-column-names", "--execute", check)
+	var out, stderr bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &out, &stderr
+	if err := cmd.Run(); err != nil {
+		msg := strings.TrimSpace(stderr.String())
+		if msg == "" {
+			msg = err.Error()
+		}
+		return fmt.Errorf("cannot verify MariaDB user: %s", msg)
+	}
+	if strings.TrimSpace(out.String()) != "1" {
+		return fmt.Errorf("MariaDB user %q@localhost does not exist", username)
+	}
+	return runMariaDB(fmt.Sprintf("REVOKE ALL PRIVILEGES ON `%s`.* FROM %s@'localhost';\n", database, sqlStringLiteral(username)))
+}

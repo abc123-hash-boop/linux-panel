@@ -1,4 +1,4 @@
-import{u as rr,r as ee,j as W}from"./index-0rY1q8Th.js";import{X as Xr}from"./x-DcnYDcUq.js";import{P as Gr}from"./plus-CoY5Naha.js";/**
+import{u as rr,r as ee,j as W}from"./index-P_ZFt4X3.js";import{X as Xr}from"./x-DmNhZkyM.js";import{P as Gr}from"./plus-dXiN3TXd.js";/**
  * Copyright (c) 2014-2024 The xterm.js authors. All rights reserved.
  * @license MIT
  *

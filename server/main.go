@@ -145,6 +145,11 @@ func main() {
 		protected.GET("/sites/mariadb", panelApi.MariaDBDatabases)
 		protected.POST("/sites/mariadb/create", panelApi.MariaDBCreate)
 		protected.POST("/sites/mariadb/delete", panelApi.MariaDBDelete)
+		protected.GET("/sites/mariadb/users", panelApi.MariaDBUsers)
+		protected.POST("/sites/mariadb/users/create", panelApi.MariaDBUserCreate)
+		protected.POST("/sites/mariadb/users/password", panelApi.MariaDBUserPassword)
+		protected.POST("/sites/mariadb/users/grant", panelApi.MariaDBUserGrant)
+		protected.POST("/sites/mariadb/users/revoke", panelApi.MariaDBUserRevoke)
 
 		/*
 		 * ========================================================

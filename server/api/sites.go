@@ -268,3 +268,101 @@ func MariaDBDelete(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, gin.H{"success": true})
 }
+
+// MariaDBUsers GET /api/sites/mariadb/users
+func MariaDBUsers(c *gin.Context) {
+	users, err := service.MariaDBListUsers()
+	if err != nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"users": users})
+}
+
+// MariaDBUserCreate POST /api/sites/mariadb/users/create
+func MariaDBUserCreate(c *gin.Context) {
+	var req struct {
+		Username string `json:"username"`
+		Password string `json:"password"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	credentials, err := service.MariaDBCreateUser(req.Username, req.Password)
+	if err != nil {
+		status := http.StatusBadRequest
+		if strings.Contains(err.Error(), "cannot connect") || strings.Contains(err.Error(), "command failed") {
+			status = http.StatusServiceUnavailable
+		} else if strings.Contains(err.Error(), "already exists") {
+			status = http.StatusConflict
+		}
+		c.JSON(status, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusCreated, gin.H{"success": true, "credentials": credentials})
+}
+
+// MariaDBUserPassword POST /api/sites/mariadb/users/password
+func MariaDBUserPassword(c *gin.Context) {
+	var req struct {
+		Username string `json:"username"`
+		Password string `json:"password"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	password, err := service.MariaDBResetUserPassword(req.Username, req.Password)
+	if err != nil {
+		status := http.StatusBadRequest
+		if strings.Contains(err.Error(), "cannot verify") || strings.Contains(err.Error(), "command failed") {
+			status = http.StatusServiceUnavailable
+		}
+		c.JSON(status, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "username": req.Username, "password": password, "host": "127.0.0.1"})
+}
+
+// MariaDBUserGrant POST /api/sites/mariadb/users/grant
+func MariaDBUserGrant(c *gin.Context) {
+	var req struct {
+		Username string `json:"username"`
+		Database string `json:"database"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if err := service.MariaDBGrantDatabase(req.Username, req.Database); err != nil {
+		status := http.StatusBadRequest
+		if strings.Contains(err.Error(), "cannot verify") || strings.Contains(err.Error(), "command failed") {
+			status = http.StatusServiceUnavailable
+		}
+		c.JSON(status, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true})
+}
+
+// MariaDBUserRevoke POST /api/sites/mariadb/users/revoke
+func MariaDBUserRevoke(c *gin.Context) {
+	var req struct {
+		Username string `json:"username"`
+		Database string `json:"database"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if err := service.MariaDBRevokeDatabase(req.Username, req.Database); err != nil {
+		status := http.StatusBadRequest
+		if strings.Contains(err.Error(), "cannot verify") || strings.Contains(err.Error(), "command failed") {
+			status = http.StatusServiceUnavailable
+		}
+		c.JSON(status, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true})
+}

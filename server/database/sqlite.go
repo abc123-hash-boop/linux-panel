@@ -5,8 +5,6 @@ import (
 	"log"
 
 	_ "modernc.org/sqlite"
-
-	"golang.org/x/crypto/bcrypt"
 )
 
 var DB *sql.DB
@@ -29,7 +27,7 @@ func Init() {
 
 	createTable()
 
-	createAdmin()
+	initializeSetup()
 
 }
 
@@ -125,44 +123,5 @@ func createTable() {
 
 	// 迁移：为旧数据库补充 recall_sessions 列
 	DB.Exec("ALTER TABLE copilot_sessions ADD COLUMN recall_sessions TEXT DEFAULT '{}'")
-
-}
-
-func createAdmin() {
-
-	var count int
-
-	DB.QueryRow(
-		"SELECT COUNT(*) FROM users",
-	).Scan(&count)
-
-	if count > 0 {
-
-		return
-
-	}
-
-	hash, _ :=
-		bcrypt.GenerateFromPassword(
-			[]byte("123456"),
-			bcrypt.DefaultCost,
-		)
-
-	_, err :=
-		DB.Exec(
-			"INSERT INTO users(username,password) VALUES(?,?)",
-			"admin",
-			string(hash),
-		)
-
-	if err != nil {
-
-		log.Fatal(err)
-
-	}
-
-	log.Println(
-		"默认管理员创建 admin / 123456",
-	)
 
 }

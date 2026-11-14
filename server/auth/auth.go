@@ -101,6 +101,8 @@ func SetCookie(
 
 		Path: "/",
 
+		HttpOnly: true,
+
 		MaxAge: 86400,
 
 		SameSite: http.SameSiteLaxMode,

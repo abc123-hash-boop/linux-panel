@@ -38,6 +38,9 @@ func main() {
 		panelApi.Login,
 	)
 
+	r.GET("/api/setup/status", panelApi.SetupStatus)
+	r.POST("/api/setup", panelApi.CompleteSetup)
+
 	/*
 	 * ============================================================
 	 * API

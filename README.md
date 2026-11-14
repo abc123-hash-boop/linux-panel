@@ -31,7 +31,7 @@ PPanel 是一个面向 Linux 主机的自托管管理面板，适用于 VPS、�
 | **Files** | 文件浏览、上传、下载、创建、重命名、删除、文本文件查看与编辑 |
 | **Process Manager** | 进程列表、CPU/内存占用、排序筛选及终止进程 |
 | **Services** | systemd 服务状态查看、启动、停止和重启 |
-| **Sites** | Nginx 状态与站点管理，支持静态站点、反向代理和 PHP 应用配置场景 |
+| **Sites** | Nginx 站点管理（静态站点、反向代理、PHP 应用）；MariaDB 数据库与用户管理；SQLite 文件数据库管理 |
 | **Browser** | 远程无头 Chrome、CDP 页面控制、实时画面串流、鼠标键盘输入、多标签页和会话状态恢复；新标签页可自动跟随切换 |
 | **Copilot** | LLM Provider 配置、模型获取、对话会话管理；提供终端、文件和浏览器相关工具能力 |
 | **News** | 面板内信息/公告展示 |
@@ -72,15 +72,23 @@ Copilot 支持配置兼容的模型服务 Provider，包括自定义 API Base UR
 
 ## 站点与数据库管理
 
-Sites 页面提供 Nginx、MariaDB 与 SQLite 三个管理入口：
+Sites 页面整合了 Nginx 站点、MariaDB 和 SQLite 管理功能。
 
-- **MariaDB**：查看业务数据库、关联的 `localhost` 用户、表数量与数据大小；创建数据库时同时创建专用用户，仅授予该数据库权限。密码留空时自动生成，并且只在创建成功时返回一次。
-- **MariaDB 用户管理**：可独立创建无默认数据库权限的用户、重置用户密码，并为一个用户授予或撤销多个现有数据库的权限。新密码只在操作成功时返回一次。
-- **删除 MariaDB 数据库**：会删除数据库及其专用用户；如果该用户还拥有其他数据库的授权，Panel 会拒绝删除，避免影响其他应用。
-- **SQLite**：管理本地 SQLite 文件数据库。SQLite 不使用 MariaDB 用户名或主机配置，适合轻量级本地应用。
-- **PHP 站点附加数据库**：创建 PHP 站点时仍可勾选附加 MariaDB 数据库，创建流程与数据库管理页共用同一套 MariaDB 服务逻辑。
+### MariaDB
 
-WordPress 等 PHP 应用应选择 MariaDB，并使用创建成功时显示的数据库名、用户名、密码和主机（`127.0.0.1`）。不要使用 MariaDB 管理员 root 账户连接 PHP 应用。
+- 查看业务数据库、关联用户、表数量及数据/索引占用空间。
+- 创建数据库时可同时创建专用账户，并仅授予该数据库权限；密码可自动生成，凭据只在创建成功时显示一次。
+- 独立创建 MariaDB 用户。新用户默认没有业务数据库权限。
+- 重置用户密码，并为一个用户授予或撤销多个现有数据库的权限。
+- 删除数据库前检查关联用户是否还拥有其他数据库授权；存在其他授权时拒绝一键删除，避免误删仍被其他应用使用的账户。
+
+### SQLite
+
+通过 Panel 管理本机 SQLite 文件数据库，包括创建、查看和删除。SQLite 数据库是文件，不需要 MariaDB 用户名、密码或主机配置。
+
+### PHP 站点
+
+创建 PHP 站点时可选择附加 MariaDB 数据库，站点创建流程与 MariaDB 管理页面共用数据库服务逻辑。WordPress 等 PHP 应用应使用创建结果中的数据库名、专用用户名、密码和主机（`127.0.0.1`），不要使用 MariaDB 管理员 root 账户连接应用。
 
 ## 环境要求
 
@@ -90,7 +98,7 @@ WordPress 等 PHP 应用应选择 MariaDB，并使用创建成功时显示的数
 - Docker Engine（使用 Docker 模块时需要）
 - Chrome 或 Chromium（使用 Browser 模块时需要）
 - Nginx（使用 Sites 模块中的 Nginx 管理功能时需要）
-- MariaDB Server（使用 Sites → MariaDB 数据库管理时需要；Panel 需以具备本地 MariaDB 管理权限的账户运行）
+- MariaDB Server（使用 Sites → MariaDB 数据库管理时需要；Panel 进程需能通过本机 Unix Socket 执行 MariaDB 管理操作）
 
 Docker、Chrome、Nginx 属于可选运行依赖，不使用对应模块时无需全部安装。
 
@@ -212,7 +220,9 @@ linux-panel/
 
 ## 安全说明
 
-PPanel 具有对主机进行管理的能力，部署时请特别注意：
+PPanel 具有对主机进行管理的能力。MariaDB 管理功能通过本机 Unix Socket 执行管理操作，Panel 运行账户必须具备相应的 MariaDB 管理权限；请勿将数据库管理员凭据配置到 PHP 应用中。创建的应用用户默认使用 `localhost` 账户，连接信息中的主机显示为 `127.0.0.1`。
+
+部署时还请注意：
 
 - 首次登录后立即修改默认管理员密码。
 - 建议通过 Nginx、Caddy 等反向代理配置 HTTPS。
